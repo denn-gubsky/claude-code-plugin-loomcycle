@@ -1,0 +1,15 @@
+# OS / editor cruft
+.DS_Store
+*.swp
+
+# Secrets — never commit. loomcycle bearer tokens, API keys, env files.
+.env
+.env.*
+*.pem
+*.key
+
+# Cross-repo design sketches live in loomcycle-internal (Gitea), not here.
+/doc-internal/
+
+# Local plugin-data scratch produced while testing hooks.
+/.claude-plugin-data/
