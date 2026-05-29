@@ -89,7 +89,7 @@ claude plugin validate ./claude-code-plugin-loomcycle   # validate before publis
 
 | This plugin | loomcycle | Claude Code |
 |---|---|---|
-| 1.0.0 | ≥ v0.12.x (`loomcycle mcp` + meta-tools) | ≥ 2.1 |
+| 0.12.8 | ≥ v0.12.x (`loomcycle mcp` + meta-tools) | ≥ 2.1 |
 
 The plugin consumes loomcycle's MCP tools verbatim. If a capability is missing,
 it's a feature request on the loomcycle repo — the plugin ships no workarounds.

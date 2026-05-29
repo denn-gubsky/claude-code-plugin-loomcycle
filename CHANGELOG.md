@@ -4,11 +4,14 @@ All notable changes to this project are documented here. The format follows
 [Keep a Changelog](https://keepachangelog.com/) and the project adheres to
 [Semantic Versioning](https://semver.org/).
 
-## [1.0.0] — 2026-05-29
+## [0.12.8] — 2026-05-29
 
-**Initial release.** The Claude Code-side UX layer for loomcycle (RFC B). Wraps
+**First release.** The Claude Code-side UX layer for loomcycle (RFC B). Wraps
 loomcycle's `loomcycle mcp` stdio server and its meta-tools; zero loomcycle-side
 code changes.
+
+The plugin tracks loomcycle's version vector (0.12.x) during the v1.x RFC
+batch; **v1.0.0 is reserved for the batch release** once the remaining RFCs land.
 
 ### Added
 
