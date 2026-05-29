@@ -56,6 +56,7 @@ Distribution: users run `/plugin marketplace add denn-gubsky/claude-code-plugin-
 - Commands/skills are thin: they describe the MCP tool call and the rendering. No logic the runtime should own.
 - `spawn_run` takes `segments` (array), not a `prompt` string — wrap the operator's text as one segment.
 - `list_runs` requires `user_id` — commands must supply it (from `/loomcycle-connect` state or `--user`).
+- **Versioning tracks loomcycle's vector through the v1.x batch** (not an independent plugin semver). First release is `v0.12.8`, matching loomcycle at ship time; bump alongside loomcycle's `v0.X.Y`. **`v1.0.0` is reserved for the v1.x batch release** once the remaining RFCs land — a lone plugin "1.0" would falsely signal the batch is done. Keep `.claude-plugin/plugin.json` + `marketplace.json` versions in sync, and tag releases `vX.Y.Z`. `marketplace.json` keeps `ref: main` during development (installs track latest); pin it to the release tag at v1.0.0.
 - Commit subjects ≤72 chars, imperative, conventional prefix. Close with `Co-Authored-By` when Claude wrote substantial content.
 
 ## When in doubt
