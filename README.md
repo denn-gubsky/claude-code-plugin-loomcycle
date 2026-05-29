@@ -1,3 +1,7 @@
+<p align="center">
+  <img src=".github/social-preview.png" alt="loomcycle plugin for Claude Code" width="720">
+</p>
+
 # loomcycle plugin for Claude Code
 
 Drive a [loomcycle](https://github.com/denn-gubsky/loomcycle) agentic runtime
