@@ -36,7 +36,7 @@ Distribution: users run `/plugin marketplace add denn-gubsky/claude-code-plugin-
 2. **Plan** — for anything beyond a one-line fix, write a plan with a verification step.
 3. **Feature branch** — `feature-<short>` off `main`. Never commit to `main` directly.
 4. **Code** — small, focused, individually-reviewable commits.
-5. **Validate** — `claude plugin validate .` (and `--strict`) must pass. JSON files parse under `jq`. Every command/skill has valid frontmatter.
+5. **Validate** — `claude plugin validate .` must pass. JSON files parse under `jq`; every command/skill has valid frontmatter. (`--strict` flags one accepted false-positive: this `CLAUDE.md` is the repo dev guide, not plugin-runtime context — it auto-loads when you develop the repo and is inert for end-users.)
 6. **Tool-name cross-check** — every `mcp__loomcycle__<tool>` reference must match a real tool in loomcycle's `tools.go`. No PREVIEW-only tools.
 7. **Self-review** — read the diff cold. No secrets, no dead files.
 8. **PR** — one branch, one PR. Title = what it does, ≤72 chars. Body = why → what → tested.
