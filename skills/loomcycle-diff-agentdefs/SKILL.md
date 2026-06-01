@@ -31,6 +31,16 @@ Steps:
    - `max_tokens`, `model`, `provider`, `tier`, `effort` — any scalar changes.
    - Any other changed keys.
 
+   **`provider: code-js` (v0.16, RFC J).** If either version sets
+   `provider: code-js`, that version is a **synthetic code agent** — it runs
+   operator-authored JavaScript (`agent_code/<name>/index.js`) instead of
+   calling an LLM, at zero token cost. For such a version `model` / `effort` /
+   `max_tokens` are inert (no model is called), so don't read into them; the
+   behavioural ground truth is the JS file, not the def fields. Call out a
+   `provider` flip **into or out of** `code-js` prominently — it turns the agent
+   from model-driven to code-driven (or back), a far bigger change than any
+   prompt edit.
+
 4. **Summarise the intent.** In one line, characterise the change ("widened
    tool access + tightened the system prompt's output format"). Note the
    lineage (`parent_def_id`) and which is newer (`version` / `created_at`).

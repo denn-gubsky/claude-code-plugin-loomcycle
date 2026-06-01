@@ -4,6 +4,37 @@ All notable changes to this project are documented here. The format follows
 [Keep a Changelog](https://keepachangelog.com/) and the project adheres to
 [Semantic Versioning](https://semver.org/).
 
+## [0.16.1] — 2026-06-01
+
+**Version-vector catch-up to loomcycle v0.16.1**, plus new memory surface. The
+plugin had stayed at 0.12.8 while loomcycle advanced through v0.13–v0.16.1
+(A2A, Input Webhooks, Memory ranking + `MemoryBackendDef`, the MemoryLayer, and
+the synthetic `code-js` provider). Per the versioning convention the plugin
+tracks loomcycle's vector — this release re-syncs it.
+
+All v0.12.x → v0.16.x meta-tool additions are **back-compatible**, so the
+existing six commands and the spawn/segment shape required no change. Every
+`mcp__loomcycle__<tool>` reference was re-verified against loomcycle's
+`internal/api/mcp/tools.go` at v0.16.1.
+
+### Added
+
+- **`/loomcycle:memory <recall|search|add|get|set|list>`** — wraps the `memory`
+  meta-tool. Surfaces the v0.16 MemoryLayer (`add` conversation facts /
+  natural-language `recall`) and v0.9 vector `search`, alongside plain
+  key/value `get`/`set`/`list`. `--scope=agent|user` selects the keyspace
+  (default `agent`). Documents the `capability_unsupported` refusal that
+  `add`/`recall` return against the default (non-memory-layer) backend — a
+  config signal, not a plugin bug.
+
+### Changed
+
+- **`loomcycle-diff-agentdefs` skill** now recognises `provider: code-js`
+  (v0.16 RFC J synthetic code agents): such a version runs operator JavaScript
+  at zero token cost, so its `model`/`effort`/`max_tokens` are inert, and a
+  `provider` flip into/out of `code-js` is called out as a first-order change.
+- Version bumped across `plugin.json`, `marketplace.json`, README compat row.
+
 ## [0.12.8] — 2026-05-29
 
 **First release.** The Claude Code-side UX layer for loomcycle (RFC B). Wraps

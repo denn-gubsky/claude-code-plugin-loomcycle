@@ -1,8 +1,8 @@
 {
   "name": "loomcycle",
   "displayName": "loomcycle",
-  "version": "0.12.8",
-  "description": "Drive a loomcycle agentic runtime from inside Claude Code — spawn/cancel/list runs, snapshot, evaluate, and import .claude/ repos, all via slash commands and skills over loomcycle's bundled MCP server.",
+  "version": "0.16.1",
+  "description": "Drive a loomcycle agentic runtime from inside Claude Code — spawn/cancel/list runs, snapshot, evaluate, inspect memory, and import .claude/ repos, all via slash commands and skills over loomcycle's bundled MCP server.",
   "author": {
     "name": "Dennis Gubsky",
     "email": "dgubsky@waverleysoftware.com",
