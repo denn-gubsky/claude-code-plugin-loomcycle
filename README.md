@@ -6,8 +6,8 @@
 
 Drive a [loomcycle](https://github.com/denn-gubsky/loomcycle) agentic runtime
 from inside Claude Code — spawn and cancel runs, list them, snapshot the
-runtime, submit evaluations, and import `.claude/` repos — all through slash
-commands and skills, with no JSON pasting.
+runtime, submit evaluations, inspect agent memory, and import `.claude/` repos
+— all through slash commands and skills, with no JSON pasting.
 
 This plugin is the **UX layer** over loomcycle's `loomcycle mcp` stdio server.
 loomcycle exposes its primitives as MCP meta-tools (`spawn_run`, `cancel_run`,
@@ -59,6 +59,7 @@ All commands are namespaced under the plugin name: `/loomcycle:<command>`.
 | `/loomcycle:cancel <agent_id> [--reason=<text>]` | `cancel_run` | Cancel a running agent; cascades to sub-agents; idempotent. |
 | `/loomcycle:snapshot <create\|list\|restore\|delete> [id]` | the 4 snapshot tools | Runtime snapshot ops from the IDE. Restore/delete confirm first. |
 | `/loomcycle:eval <run_id> <score> [--rationale=<text>]` | `evaluation` (`op=submit`) | Record an evaluation against a completed run. loomcycle never auto-promotes on score. |
+| `/loomcycle:memory <recall\|search\|add\|get\|set\|list> [--scope=agent\|user] [args…]` | `memory` | Inspect/edit an agent's memory: semantic `recall`/`search`, `add` conversation facts, or plain key/value. `add`/`recall` need a memory-layer backend (v0.16). |
 
 ## Skills
 
@@ -93,7 +94,12 @@ claude plugin validate ./claude-code-plugin-loomcycle   # validate before publis
 
 | This plugin | loomcycle | Claude Code |
 |---|---|---|
-| 0.12.8 | ≥ v0.12.x (`loomcycle mcp` + meta-tools) | ≥ 2.1 |
+| 0.16.1 | ≥ v0.12.x (`loomcycle mcp` + meta-tools); memory `add`/`recall` need ≥ v0.16 | ≥ 2.1 |
+
+The plugin's version tracks loomcycle's version vector through the v1.x batch.
+All tool contracts are re-verified against loomcycle's `internal/api/mcp/tools.go`
+each release — the v0.12.x → v0.16.x meta-tool additions are back-compatible,
+so the existing commands work unchanged against any loomcycle ≥ v0.12.x.
 
 The plugin consumes loomcycle's MCP tools verbatim. If a capability is missing,
 it's a feature request on the loomcycle repo — the plugin ships no workarounds.
