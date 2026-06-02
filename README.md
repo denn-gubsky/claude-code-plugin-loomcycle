@@ -60,6 +60,7 @@ All commands are namespaced under the plugin name: `/loomcycle:<command>`.
 | `/loomcycle:snapshot <create\|list\|restore\|delete> [id]` | the 4 snapshot tools | Runtime snapshot ops from the IDE. Restore/delete confirm first. |
 | `/loomcycle:eval <run_id> <score> [--rationale=<text>]` | `evaluation` (`op=submit`) | Record an evaluation against a completed run. loomcycle never auto-promotes on score. |
 | `/loomcycle:memory <recall\|search\|add\|get\|set\|list> [--scope=agent\|user] [args…]` | `memory` | Inspect/edit an agent's memory: semantic `recall`/`search`, `add` conversation facts, or plain key/value. `add`/`recall` need a memory-layer backend (v0.16). |
+| `/loomcycle:operator-token <create\|rotate\|retire\|get\|list> [--name=<n>] [--tenant=<id>] [--subject=<s>] [--scopes=a,b]` | `operatortokendef` | Mint/rotate/retire per-principal bearer tokens (RFC L multi-tenant auth, loomcycle ≥ v0.17). Operator-admin only; create/rotate show the plaintext **once**. |
 
 ## Skills
 
@@ -81,6 +82,42 @@ Both hooks ship **disabled** — they no-op unless you opt in with an env var.
 | capture-run-telemetry | `LOOMCYCLE_PLUGIN_TELEMETRY=1` | Append `{ts, run_id, agent_id}` to `${CLAUDE_PLUGIN_DATA}/run-telemetry.jsonl` after each `spawn_run`. |
 | auto-snapshot-on-error | `LOOMCYCLE_PLUGIN_AUTO_SNAPSHOT=1` | On a state-mutating tool error, run `loomcycle snapshot --description pre-error-<ts>`. Needs `LOOMCYCLE_AUTH_TOKEN` (and optionally `LOOMCYCLE_BASE_URL`) exported in the shell that launches Claude Code — the hook reads the bearer from the environment, never from a substituted command string. |
 
+## Multi-tenant authorization, isolation & token rotation
+
+loomcycle v0.17.0 (RFC L) adds per-principal bearer tokens (`OperatorTokenDef`,
+`lct_…`), each bound to an authoritative `{tenant_id, subject, scopes}` resolved
+**from the token**. How much of that the plugin enforces depends entirely on
+**which transport** the bundled MCP server uses:
+
+| Transport | What the plugin is | Isolation / scopes |
+|---|---|---|
+| **stdio** (default `.mcp.json`: `loomcycle mcp`) | **single-operator / admin** — the launching process has full authority | **None enforced at the plugin.** Wire `tenant_id` / `user_id` are trusted verbatim; the plugin can act across the whole instance. Correct for driving *your own* runtime. |
+| **HTTP** (`POST /v1/_mcp`, see [examples/mcp-http-tenant.json](examples/mcp-http-tenant.json)) | a **confined principal** | **Full.** `applyPrincipal` overrides any wider wire value; under-scoped calls get a `scope` refusal; reads are tenant-filtered. |
+
+**To confine the plugin to one tenant**, swap the `loomcycle` server to the HTTP
+transport and set `auth_token` to a scoped `lct_…` bearer — see
+[examples/mcp-http-tenant.json](examples/mcp-http-tenant.json). It is a *swap*,
+not a second server: a differently-named server would not back the
+`mcp__loomcycle__*` commands.
+
+### Token rotation runbook
+
+`/loomcycle:operator-token rotate` mints a replacement valid alongside the old
+one for the grace window. Two sharp edges to know:
+
+1. **Creating the first admin `OperatorTokenDef` disables the legacy
+   `LOOMCYCLE_AUTH_TOKEN`** for inbound HTTP (loomcycle fails closed onto the
+   substrate). If `auth_token` is still that legacy value, the HTTP-using
+   **auto-snapshot hook** (and the HTTP transport above) will start returning
+   401 — update `auth_token` to a valid `lct_…` admin bearer.
+2. **A running `loomcycle mcp` captured its token at launch.** After updating
+   the `auth_token` userConfig, **restart Claude Code** so the MCP server picks
+   up the new bearer. Rotate within the grace window to avoid a gap.
+
+The stdio command surface keeps working across a rotation regardless (stdio is
+operator-trust) — only the HTTP-authed paths (the snapshot hook, or the HTTP
+transport) depend on a currently-valid bearer.
+
 ## Local development
 
 ```bash
@@ -94,7 +131,7 @@ claude plugin validate ./claude-code-plugin-loomcycle   # validate before publis
 
 | This plugin | loomcycle | Claude Code |
 |---|---|---|
-| 0.16.1 | ≥ v0.12.x (`loomcycle mcp` + meta-tools); memory `add`/`recall` need ≥ v0.16 | ≥ 2.1 |
+| 0.17.0 | ≥ v0.12.x (`loomcycle mcp` + meta-tools); memory `add`/`recall` need ≥ v0.16; `operator-token` needs ≥ v0.17 | ≥ 2.1 |
 
 The plugin's version tracks loomcycle's version vector through the v1.x batch.
 All tool contracts are re-verified against loomcycle's `internal/api/mcp/tools.go`

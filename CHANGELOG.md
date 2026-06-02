@@ -4,6 +4,53 @@ All notable changes to this project are documented here. The format follows
 [Keep a Changelog](https://keepachangelog.com/) and the project adheres to
 [Semantic Versioning](https://semver.org/).
 
+## [0.17.0] — 2026-06-02
+
+**Version-vector track to loomcycle v0.17.0** — OSS multi-tenant authorization
+(RFC L). loomcycle v0.17.0 mints per-principal bearer tokens
+(`OperatorTokenDef`), each bound to an authoritative `{tenant_id, subject,
+allowed_scopes}` resolved from the token. It exposes a new `operatortokendef`
+MCP meta-tool; this release wraps it. All other v0.16.1 → v0.17.0 changes are
+back-compatible — the existing seven commands and the spawn/segment shape were
+re-verified against loomcycle's `internal/api/mcp/tools.go` at v0.17.0 and
+needed no change.
+
+### Added
+
+- **`/loomcycle:operator-token <create|rotate|retire|get|list>`** — wraps the
+  `operatortokendef` meta-tool. `create` mints a token bound to
+  `{tenant_id (required), subject, scopes}`; `rotate` mints a replacement with
+  a grace window; `retire` / `get` / `list` are metadata-only. The command
+  enforces strict one-time-plaintext handling: `create` / `rotate` surface the
+  secret **once** with a "store it now, not retrievable later" warning, never
+  persist it to disk, and never re-echo it. Documents the `substrate:admin`
+  scope requirement on the calling bearer and the default-deny `--scopes`
+  posture.
+- **`examples/mcp-http-tenant.json`** — a drop-in HTTP-transport config that
+  points the `loomcycle` server at loomcycle's principal-enforced
+  `POST /v1/_mcp` endpoint, so the plugin can run **confined to one tenant**
+  under a scoped `lct_…` bearer (rather than the stdio transport's
+  single-operator admin posture). A swap of the existing server, not a second
+  server — the commands work unchanged under the token's principal.
+
+### Documentation
+
+- README gains a **Multi-tenant authorization, isolation & token rotation**
+  section: the stdio-(admin) vs HTTP-(principal) trust model, when to use each,
+  and a token-rotation runbook covering the legacy-`LOOMCYCLE_AUTH_TOKEN`
+  disable on first admin token (which 401s the HTTP-authed auto-snapshot hook)
+  and the MCP-restart needed to pick up a rotated bearer.
+
+### Notes
+
+- Operator-token ops are **operator-admin only**, but the posture is
+  transport-dependent: over **stdio** (default) the MCP server is
+  single-operator by construction and *always* has admin — no scope refusal
+  regardless of `auth_token`. Over the **HTTP** transport the `lct_…` bearer's
+  principal must carry `substrate:admin`; a narrow bearer gets a `scope` refusal
+  (by design, not a bug). The earlier note implying stdio could refuse on scope
+  was corrected.
+
 ## [0.16.1] — 2026-06-01
 
 **Version-vector catch-up to loomcycle v0.16.1**, plus new memory surface. The
