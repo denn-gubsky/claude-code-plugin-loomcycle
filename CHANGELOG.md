@@ -4,6 +4,36 @@ All notable changes to this project are documented here. The format follows
 [Keep a Changelog](https://keepachangelog.com/) and the project adheres to
 [Semantic Versioning](https://semver.org/).
 
+## [0.17.0] — 2026-06-02
+
+**Version-vector track to loomcycle v0.17.0** — OSS multi-tenant authorization
+(RFC L). loomcycle v0.17.0 mints per-principal bearer tokens
+(`OperatorTokenDef`), each bound to an authoritative `{tenant_id, subject,
+allowed_scopes}` resolved from the token. It exposes a new `operatortokendef`
+MCP meta-tool; this release wraps it. All other v0.16.1 → v0.17.0 changes are
+back-compatible — the existing seven commands and the spawn/segment shape were
+re-verified against loomcycle's `internal/api/mcp/tools.go` at v0.17.0 and
+needed no change.
+
+### Added
+
+- **`/loomcycle:operator-token <create|rotate|retire|get|list>`** — wraps the
+  `operatortokendef` meta-tool. `create` mints a token bound to
+  `{tenant_id (required), subject, scopes}`; `rotate` mints a replacement with
+  a grace window; `retire` / `get` / `list` are metadata-only. The command
+  enforces strict one-time-plaintext handling: `create` / `rotate` surface the
+  secret **once** with a "store it now, not retrievable later" warning, never
+  persist it to disk, and never re-echo it. Documents the `substrate:admin`
+  scope requirement on the calling bearer and the default-deny `--scopes`
+  posture.
+
+### Notes
+
+- Operator-token ops are **operator-admin only**: the plugin's MCP bearer
+  (`LOOMCYCLE_AUTH_TOKEN` via userConfig) must resolve to a principal carrying
+  `substrate:admin`. On a single-operator deployment the legacy shared token is
+  admin by default; a narrow-scoped bearer gets a `scope` refusal (not a bug).
+
 ## [0.16.1] — 2026-06-01
 
 **Version-vector catch-up to loomcycle v0.16.1**, plus new memory surface. The

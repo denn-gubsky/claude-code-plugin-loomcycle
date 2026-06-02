@@ -60,6 +60,7 @@ All commands are namespaced under the plugin name: `/loomcycle:<command>`.
 | `/loomcycle:snapshot <create\|list\|restore\|delete> [id]` | the 4 snapshot tools | Runtime snapshot ops from the IDE. Restore/delete confirm first. |
 | `/loomcycle:eval <run_id> <score> [--rationale=<text>]` | `evaluation` (`op=submit`) | Record an evaluation against a completed run. loomcycle never auto-promotes on score. |
 | `/loomcycle:memory <recall\|search\|add\|get\|set\|list> [--scope=agent\|user] [args…]` | `memory` | Inspect/edit an agent's memory: semantic `recall`/`search`, `add` conversation facts, or plain key/value. `add`/`recall` need a memory-layer backend (v0.16). |
+| `/loomcycle:operator-token <create\|rotate\|retire\|get\|list> [--name=<n>] [--tenant=<id>] [--subject=<s>] [--scopes=a,b]` | `operatortokendef` | Mint/rotate/retire per-principal bearer tokens (RFC L multi-tenant auth, loomcycle ≥ v0.17). Operator-admin only; create/rotate show the plaintext **once**. |
 
 ## Skills
 
@@ -94,7 +95,7 @@ claude plugin validate ./claude-code-plugin-loomcycle   # validate before publis
 
 | This plugin | loomcycle | Claude Code |
 |---|---|---|
-| 0.16.1 | ≥ v0.12.x (`loomcycle mcp` + meta-tools); memory `add`/`recall` need ≥ v0.16 | ≥ 2.1 |
+| 0.17.0 | ≥ v0.12.x (`loomcycle mcp` + meta-tools); memory `add`/`recall` need ≥ v0.16; `operator-token` needs ≥ v0.17 | ≥ 2.1 |
 
 The plugin's version tracks loomcycle's version vector through the v1.x batch.
 All tool contracts are re-verified against loomcycle's `internal/api/mcp/tools.go`
