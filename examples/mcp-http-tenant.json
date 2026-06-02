@@ -1,0 +1,11 @@
+{
+  "mcpServers": {
+    "loomcycle": {
+      "type": "http",
+      "url": "${user_config.base_url}/v1/_mcp",
+      "headers": {
+        "Authorization": "Bearer ${user_config.auth_token}"
+      }
+    }
+  }
+}

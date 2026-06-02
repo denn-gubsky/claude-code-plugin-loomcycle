@@ -26,13 +26,30 @@ needed no change.
   persist it to disk, and never re-echo it. Documents the `substrate:admin`
   scope requirement on the calling bearer and the default-deny `--scopes`
   posture.
+- **`examples/mcp-http-tenant.json`** — a drop-in HTTP-transport config that
+  points the `loomcycle` server at loomcycle's principal-enforced
+  `POST /v1/_mcp` endpoint, so the plugin can run **confined to one tenant**
+  under a scoped `lct_…` bearer (rather than the stdio transport's
+  single-operator admin posture). A swap of the existing server, not a second
+  server — the commands work unchanged under the token's principal.
+
+### Documentation
+
+- README gains a **Multi-tenant authorization, isolation & token rotation**
+  section: the stdio-(admin) vs HTTP-(principal) trust model, when to use each,
+  and a token-rotation runbook covering the legacy-`LOOMCYCLE_AUTH_TOKEN`
+  disable on first admin token (which 401s the HTTP-authed auto-snapshot hook)
+  and the MCP-restart needed to pick up a rotated bearer.
 
 ### Notes
 
-- Operator-token ops are **operator-admin only**: the plugin's MCP bearer
-  (`LOOMCYCLE_AUTH_TOKEN` via userConfig) must resolve to a principal carrying
-  `substrate:admin`. On a single-operator deployment the legacy shared token is
-  admin by default; a narrow-scoped bearer gets a `scope` refusal (not a bug).
+- Operator-token ops are **operator-admin only**, but the posture is
+  transport-dependent: over **stdio** (default) the MCP server is
+  single-operator by construction and *always* has admin — no scope refusal
+  regardless of `auth_token`. Over the **HTTP** transport the `lct_…` bearer's
+  principal must carry `substrate:admin`; a narrow bearer gets a `scope` refusal
+  (by design, not a bug). The earlier note implying stdio could refuse on scope
+  was corrected.
 
 ## [0.16.1] — 2026-06-01
 

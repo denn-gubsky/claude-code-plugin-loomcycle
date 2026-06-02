@@ -72,13 +72,30 @@ For `--scopes`, pass the **narrowest** set: a per-app key might be
 `runs:create`; only an admin/operator key needs `substrate:admin`. Default-deny
 — omitted scopes are not granted.
 
-## Scope note — this command needs an admin bearer
+## Scope note — depends on the transport
 
-`operatortokendef` is operator-admin-only. The plugin's MCP connection bearer
-(`LOOMCYCLE_AUTH_TOKEN`, set at install via userConfig) must resolve to a
-principal carrying `substrate:admin`. A narrow-scoped bearer gets a
-`scope` refusal — surface that plainly; it is **not** a plugin bug. On a
-single-operator deployment the legacy shared token is admin by default.
+`operatortokendef` is operator-admin-only, but whether that's automatic depends
+on how the plugin's MCP server is wired:
+
+- **stdio transport (default `.mcp.json`)** — the MCP server runs in the
+  operator's process and is **single-operator / admin by construction**, so
+  this command **always has admin** here regardless of `auth_token`. You will
+  not get a scope refusal over stdio.
+- **HTTP transport** (`POST /v1/_mcp`, the per-tenant confinement setup in
+  `examples/mcp-http-tenant.json`) — the bearer's principal must carry
+  `substrate:admin`. A narrow-scoped `lct_…` bearer gets a `scope` refusal here
+  — surface it plainly; it is **not** a plugin bug. (A confined per-tenant key
+  is *meant* to be unable to mint tokens.)
+
+## After `create` / `rotate` — if this is the plugin's own bearer
+
+Creating the **first** admin `OperatorTokenDef` disables the legacy
+`LOOMCYCLE_AUTH_TOKEN` for inbound HTTP. If the plugin's `auth_token` userConfig
+is that legacy token, remind the operator to update it to a valid `lct_…` admin
+bearer and **restart Claude Code** so the MCP server (and the HTTP-authed
+auto-snapshot hook) picks up the new value — rotate within the grace window to
+avoid a gap. See the README's *Token rotation runbook*. Never write the new
+token to a file on the operator's behalf.
 
 If the op is missing or unrecognised, list the five ops and stop rather than
 guessing.
