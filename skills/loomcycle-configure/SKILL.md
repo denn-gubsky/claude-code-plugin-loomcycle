@@ -1,0 +1,108 @@
+---
+name: loomcycle-configure
+description: Configure a loomcycle runtime — providers, model tiers, user tiers, fallbacks, environment variables, and deployment profiles (brew/in-system, containerized, true sandbox, server, multi-tenant, cloud). Use when the user wants to set up or tune loomcycle.yaml or its env, pick a deployment posture, wire provider routing/cost-cascades, gate plans, or lock down tool/sandbox/auth.
+allowed-tools: Read Write Edit Bash(loomcycle validate*) Bash(loomcycle doctor*) Bash(loomcycle init*)
+---
+
+# Configure loomcycle
+
+Help an operator write or tune their **`loomcycle.yaml`** (model routing) and
+**environment** (posture: sandbox, auth, storage, scale). loomcycle splits its
+configuration along one seam — keep it in mind throughout:
+
+- **`loomcycle.yaml` owns routing** — `provider_priority`, `tiers`, `models:`
+  aliases, `user_tiers:` overlays, `agents:` overrides. Declarative model policy.
+- **Environment owns posture** — tool sandbox roots, the auth token, storage
+  backend, multi-tenant pepper, replica id, observability. *How* and *where* it
+  runs.
+
+The six deployment profiles the operator may ask about are points on a
+**trust × scale** grid; each is a preset of env vars over the *same* yaml.
+
+## Hard safety rules (non-negotiable)
+
+1. **Never read or write `.env` / `.env.local` / `.env.example`.** They are
+   secret-bearing and gitignored. To set a variable, **print the exact line for
+   the operator to add themselves**. You may read/write `loomcycle.yaml`.
+2. **Never put a secret value in `loomcycle.yaml` or any file.** API keys and
+   `LOOMCYCLE_AUTH_TOKEN` are referenced by **env-var name** only. The yaml
+   never holds a key.
+3. **Tools are default-deny.** `Read`/`Write`/`Edit`/`Bash`/`HTTP`/`WebFetch`
+   refuse every call until their root/allowlist env var is set. Recommend the
+   *narrowest* setting that works; never widen "to make it work."
+4. **Bash is not a sandbox.** It is cwd-restricted + env-scrubbed only. If Bash
+   is exposed to untrusted prompts, the runtime **must** be containerized — say
+   so explicitly.
+5. **Validate before declaring done.** Run `loomcycle validate <yaml>` (and
+   `loomcycle doctor` if an instance is reachable). Report the real outcome.
+
+## Workflow
+
+1. **Discover.** Ask for (or read) the current `loomcycle.yaml` and which
+   providers the operator has keys for. Ask what they're building (personal
+   automation? an app backend? a multi-customer SaaS?) — that picks the profile.
+2. **Pick the profile.** Use the selector below. When unsure between two,
+   pick the *safer* (lower-trust) one and say why.
+3. **Author routing.** Write/adjust `loomcycle.yaml` per
+   [reference/routing.md](reference/routing.md) — start at library defaults,
+   push exceptions up the precedence stack only as needed.
+4. **Author posture.** Emit the env lines for the chosen profile from
+   [reference/profiles.md](reference/profiles.md); cross-check each var against
+   [reference/env-vars.md](reference/env-vars.md). Print env lines for the
+   operator to add — never write the env file.
+5. **Validate.** `loomcycle validate <yaml>`; if reachable, `loomcycle doctor`
+   and `GET /v1/_resolver` to confirm providers probe green.
+
+## Profile selector
+
+| Profile | Use when | Trust | Storage | Detail |
+|---|---|---|---|---|
+| **1. Brew + in-system agent** | Personal workstation / local automation; you trust every prompt | **Full host** — all tools incl. Bash/Write/Edit on real dirs | SQLite | [profiles.md §1](reference/profiles.md) |
+| **2. Containerized (in-container access)** | Same power, contained blast radius; the recommended default for exposing Bash | Container-bounded | SQLite or PG | [profiles.md §2](reference/profiles.md) |
+| **3. True sandbox** | Untrusted/model-authored prompts; least privilege | Minimal — Bash off, default-deny roots, tight HTTP allowlist, code-js for any exec | SQLite or PG | [profiles.md §3](reference/profiles.md) |
+| **4. Server** | A single backend serving one app's agents | App-scoped tools, no Bash, callback allowlist | SQLite or PG | [profiles.md §4](reference/profiles.md) |
+| **5. Multi-tenant** | One instance fronting customers who don't trust each other | Per-principal tokens (RFC L), tenant isolation | **Postgres** | [profiles.md §5](reference/profiles.md) |
+| **6. Cloud / multi-replica** | Horizontal HA behind a load balancer | Server/multi-tenant + N replicas | **Postgres** | [profiles.md §6](reference/profiles.md) |
+
+Profiles are cumulative: 5 builds on 4, 6 builds on 5. Read the matching section
+of [reference/profiles.md](reference/profiles.md) before emitting config — each
+lists the exact env set, the yaml shape, and the sharp edges.
+
+## Reference files (read on demand)
+
+- **[reference/routing.md](reference/routing.md)** — providers + API-key env
+  vars, the 4-layer resolver precedence, `tiers` / `user_tiers` / `models:`
+  aliases / per-agent overrides, `fallback_on_error`, and the four cookbook
+  patterns (single/multi provider × single/multi user-tier). Read this for any
+  routing question.
+- **[reference/profiles.md](reference/profiles.md)** — the six deployment
+  profiles in full: trust posture, exact env set, yaml skeleton, and sharp
+  edges per profile.
+- **[reference/env-vars.md](reference/env-vars.md)** — the grouped environment
+  variable catalogue (identity/listen, storage, tool sandboxes, providers,
+  memory, scheduler/webhooks/A2A, code-js, multi-tenant, observability,
+  cluster). Look up any `LOOMCYCLE_*` here before recommending it.
+
+## Validation cheatsheet
+
+```bash
+loomcycle validate loomcycle.yaml   # config-load checks (pin XOR tier, user_tiers default, alias cycles, unknown provider)
+loomcycle doctor                    # config + env + providers + storage + listen; exit 0 = green
+loomcycle init                      # bootstrap a starter loomcycle.yaml + README in the config dir
+```
+
+```bash
+# Live resolver matrix — which providers probe green, which models each lists:
+curl -s -H "Authorization: Bearer $LOOMCYCLE_AUTH_TOKEN" http://localhost:8787/v1/_resolver | jq .
+# Force an immediate re-probe (unstick a transient outage without a restart):
+curl -s -X POST -H "Authorization: Bearer $LOOMCYCLE_AUTH_TOKEN" http://localhost:8787/v1/_resolve/probe | jq .
+```
+
+Two resolver error classes to teach the operator: `ErrTierUnavailable` (every
+candidate stalled/unreachable → retry, 503) vs `ErrTierAgentNotAvailable`
+(agent `providers:` ∩ user_tier `provider_priority` is empty → **policy**
+refusal, "upgrade your plan", do NOT retry).
+
+This skill configures a **self-hosted** loomcycle the operator runs. It does not
+manage loomcycle's lifecycle (start/stop) — that stays the operator's job, and
+this plugin never auto-starts the binary.

@@ -4,6 +4,23 @@ All notable changes to this project are documented here. The format follows
 [Keep a Changelog](https://keepachangelog.com/) and the project adheres to
 [Semantic Versioning](https://semver.org/).
 
+## [Unreleased]
+
+### Added
+
+- **`loomcycle-configure` skill** — guided authoring of `loomcycle.yaml` +
+  environment. Covers provider routing (`provider_priority` / `tiers` /
+  `models:` aliases), `user_tiers` plan/privacy overlays, `fallback_on_error`,
+  the grouped `LOOMCYCLE_*` env-var catalogue, and six deployment profiles
+  (brew + in-system · containerized · true sandbox · server · multi-tenant ·
+  cloud) as presets on a trust × scale grid. Progressive-disclosure layout: a
+  lean `SKILL.md` plus `reference/{routing,profiles,env-vars}.md` read on
+  demand. Enforces the plugin's secret discipline — it edits `loomcycle.yaml`
+  but **never** reads/writes `.env*` (it prints the env lines for the operator)
+  and never puts a key value in any file. Grounded in loomcycle's
+  `docs/CONFIGURATION.md`, `docs/PROVIDERS.md`, `.env.example`, and the
+  multi-replica / Docker docs at v0.17.0.
+
 ## [0.17.0] — 2026-06-02
 
 **Version-vector track to loomcycle v0.17.0** — OSS multi-tenant authorization
