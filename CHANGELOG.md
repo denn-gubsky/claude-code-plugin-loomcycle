@@ -4,7 +4,22 @@ All notable changes to this project are documented here. The format follows
 [Keep a Changelog](https://keepachangelog.com/) and the project adheres to
 [Semantic Versioning](https://semver.org/).
 
-## [Unreleased]
+## [0.20.0] — 2026-06-03
+
+**Version-vector track to loomcycle v0.20.0**, and the ship vehicle for the
+`loomcycle-configure` skill (previously `[Unreleased]`). loomcycle advanced
+v0.17.0 → v0.20.0 with runtime-side, back-compatible work: `MCPServerDef`
+auto-discovery + idempotent create/rediscover (no version-spam) and inner
+`${LOOMCYCLE_*}` expansion at dynamic create/fork; inline code-js `code_body`
+ingestion via AgentDef (no host-FS bind); a non-secret run **metadata** channel
+(run input + delivery, with WebHook/Scheduler sourcing); autonomous firing of
+static yaml schedules; per-run advertisement of post-boot substrate tools; and
+`init --with-token` + auto-loaded `auth.env` for tighter bootstrap.
+
+**The MCP meta-tool surface is unchanged** — `internal/api/mcp/tools.go` is
+byte-identical between v0.17.0 and v0.20.0 (40 tools). All plugin commands,
+skills, and the spawn/segment shape were re-verified and need no change; this is
+a pure tracking bump.
 
 ### Added
 
