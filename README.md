@@ -72,6 +72,7 @@ Skills load automatically when their description matches what you're doing:
 | `loomcycle-replay-failed-run` | `get_run` → diagnose the failure → re-spawn with the smallest fix. Stops after a repeat failure and recommends an operator-side config fix. |
 | `loomcycle-diff-agentdefs` | Diff two AgentDef versions by `def_id` (`system_prompt` / `allowed_tools` / `max_tokens` / lineage). Descriptive only. |
 | `loomcycle-import-claude-code` | Guided wrapper over `loomcycle import claude-code` (RFC C2): dry-run → review the lossy report → `--write` → `validate`. |
+| `loomcycle-configure` | Author/tune `loomcycle.yaml` + env: providers, model tiers, `user_tiers`, fallbacks, the env-var catalogue, and six deployment profiles (brew/in-system · containerized · true sandbox · server · multi-tenant · cloud). Never writes the env file — prints the lines. |
 
 ## Optional hooks
 
