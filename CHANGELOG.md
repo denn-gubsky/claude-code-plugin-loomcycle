@@ -4,6 +4,23 @@ All notable changes to this project are documented here. The format follows
 [Keep a Changelog](https://keepachangelog.com/) and the project adheres to
 [Semantic Versioning](https://semver.org/).
 
+## [0.20.3] — 2026-06-04
+
+**Fix: "Duplicate hooks file detected" on load.** Newer Claude Code builds
+auto-load the standard `hooks/hooks.json`, then errored because `plugin.json`
+*also* referenced it via `"hooks": "./hooks/hooks.json"` — loading the same file
+twice. The plugin's commands/skills/MCP server still loaded, but the hooks
+failed and the plugin showed a load error.
+
+### Fixed
+
+- **Removed the `"hooks": "./hooks/hooks.json"` field from `plugin.json`.** The
+  standard `hooks/hooks.json` is discovered and loaded automatically; per Claude
+  Code's guidance, `manifest.hooks` should reference *additional* hook files
+  only, never the standard one. The PostToolUse hooks (`capture-run-telemetry`,
+  `auto-snapshot-on-error`) are unchanged and still load — they remain env-gated
+  no-ops unless `LOOMCYCLE_PLUGIN_TELEMETRY=1` / `LOOMCYCLE_PLUGIN_AUTO_SNAPSHOT=1`.
+
 ## [0.20.2] — 2026-06-04
 
 **Fix: the bundled MCP server no longer grabs the default `127.0.0.1:8787`
