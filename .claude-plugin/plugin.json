@@ -1,7 +1,7 @@
 {
   "name": "loomcycle",
   "displayName": "loomcycle",
-  "version": "0.20.1",
+  "version": "0.20.2",
   "description": "Drive a loomcycle agentic runtime from inside Claude Code — spawn/cancel/list runs, snapshot, evaluate, inspect memory, mint multi-tenant operator tokens, and import .claude/ repos, all via slash commands and skills over loomcycle's bundled MCP server.",
   "author": {
     "name": "Dennis Gubsky",

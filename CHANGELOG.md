@@ -4,6 +4,33 @@ All notable changes to this project are documented here. The format follows
 [Keep a Changelog](https://keepachangelog.com/) and the project adheres to
 [Semantic Versioning](https://semver.org/).
 
+## [0.20.2] — 2026-06-04
+
+**Fix: the bundled MCP server no longer grabs the default `127.0.0.1:8787`
+port.** `loomcycle mcp` boots a full runtime that — by default — also binds the
+HTTP/SSE listener on `LOOMCYCLE_LISTEN_ADDR` (default `127.0.0.1:8787`). Because
+the plugin launches one such server per enabled session, it would collide with a
+separately-running loomcycle instance on the same host (a real server started
+via `loomcycle`/`brew services`, or another project's). The symptom: an
+open-mode MCP runtime silently squatting on IPv4 `127.0.0.1:8787`, intercepting
+traffic meant for the operator's authenticated instance — and it kept coming
+back because the IDE session relaunches it.
+
+### Fixed
+
+- **`.mcp.json` now launches `loomcycle mcp … --no-http`.** The plugin drives
+  the server entirely over **stdio**, so the runtime needs no TCP port. The
+  `--no-http` flag (honoured only in `mcp` subcommand mode) suppresses the HTTP
+  listener, so the MCP server binds **no port at all** — eliminating the
+  collision with `8787` (and any other port) rather than just relocating it.
+  Requires a loomcycle build that supports `--no-http`.
+
+### Notes
+
+- The optional `auto-snapshot-on-error` hook still talks to your **standalone**
+  loomcycle server via `base_url` (default `http://127.0.0.1:8787`); that is a
+  separate process from the plugin's stdio MCP server and is unaffected.
+
 ## [0.20.1] — 2026-06-04
 
 **Fix: the plugin was not installable.** `/plugin marketplace add
