@@ -14,7 +14,7 @@
         "directory": ".",
         "ref": "main"
       },
-      "version": "0.20.1",
+      "version": "0.20.2",
       "description": "Drive a loomcycle agentic runtime from inside Claude Code.",
       "author": { "name": "Dennis Gubsky", "url": "https://github.com/denn-gubsky" }
     }

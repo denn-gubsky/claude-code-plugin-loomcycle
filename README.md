@@ -45,7 +45,13 @@ At install you'll be prompted for:
 | `base_url` | loomcycle base URL for the optional auto-snapshot hook | `http://127.0.0.1:8787` |
 
 The bundled MCP server entry (`.mcp.json`) then launches
-`loomcycle mcp --config <config_path>` automatically when the plugin is enabled.
+`loomcycle mcp --config <config_path> --no-http` automatically when the plugin
+is enabled. The `--no-http` flag suppresses the runtime's HTTP listener — the
+plugin drives the server entirely over stdio, so it needs no TCP port. This
+keeps the MCP server from colliding with a separately-running loomcycle
+instance on the default `127.0.0.1:8787` (e.g. your real server started via
+`loomcycle`/`brew services`, or another project's). Without it, every enabled
+plugin session would try to bind `8787` and fight whatever already owns it.
 
 ## Commands
 
@@ -132,6 +138,7 @@ claude plugin validate ./claude-code-plugin-loomcycle   # validate before publis
 
 | This plugin | loomcycle | Claude Code |
 |---|---|---|
+| 0.20.2 | as 0.20.1, **plus** the `loomcycle mcp --no-http` flag (verified on v0.22.0). On an older build that doesn't recognise `--no-http`, the server errors at launch — pin 0.20.1 or upgrade loomcycle. | ≥ 2.1 |
 | 0.20.1 | ≥ v0.12.x (`loomcycle mcp` + meta-tools); memory `add`/`recall` need ≥ v0.16; `operator-token` needs ≥ v0.17 | ≥ 2.1 |
 
 The plugin's version tracks loomcycle's version vector through the v1.x batch.
