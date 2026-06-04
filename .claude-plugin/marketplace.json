@@ -1,5 +1,6 @@
 {
   "name": "loomcycle",
+  "description": "Self-marketplace for the loomcycle Claude Code plugin — drive a loomcycle agentic runtime from the IDE.",
   "owner": {
     "name": "Dennis Gubsky",
     "url": "https://github.com/denn-gubsky"
@@ -13,9 +14,9 @@
         "directory": ".",
         "ref": "main"
       },
-      "version": "0.20.0",
+      "version": "0.20.1",
       "description": "Drive a loomcycle agentic runtime from inside Claude Code.",
-      "author": "Dennis Gubsky"
+      "author": { "name": "Dennis Gubsky", "url": "https://github.com/denn-gubsky" }
     }
   ]
 }

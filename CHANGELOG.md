@@ -4,6 +4,33 @@ All notable changes to this project are documented here. The format follows
 [Keep a Changelog](https://keepachangelog.com/) and the project adheres to
 [Semantic Versioning](https://semver.org/).
 
+## [0.20.1] — 2026-06-04
+
+**Fix: the plugin was not installable.** `/plugin marketplace add
+denn-gubsky/claude-code-plugin-loomcycle` failed with *"Marketplace file not
+found at …/.claude-plugin/marketplace.json"* (and the follow-on
+`/plugin install loomcycle` → *"not found in any marketplace"*).
+
+### Fixed
+
+- **Moved `marketplace.json` → `.claude-plugin/marketplace.json`.** Claude Code
+  requires the marketplace manifest under `.claude-plugin/` (alongside
+  `plugin.json`); it was at the repo root, so the manifest was never found. This
+  broke install for every user since the first release — the misplaced file had
+  also escaped `claude plugin validate`, which only validates the marketplace
+  manifest once it's in the canonical location.
+- **`plugins[0].author` is now an object** (`{name, url}`), not a bare string —
+  the marketplace schema requires an object. This second error surfaced only
+  after the move (the validator could finally see the file). `claude plugin
+  validate .` now passes clean, and `claude plugin marketplace add` succeeds.
+- Added a top-level marketplace `description`.
+
+### Changed
+
+- CLAUDE.md corrected: it claimed *"ONLY `plugin.json` lives under
+  `.claude-plugin/`"* — both JSON manifests do. Updated the structure +
+  versioning sections so the mistake isn't reintroduced.
+
 ## [0.20.0] — 2026-06-03
 
 **Version-vector track to loomcycle v0.20.0**, and the ship vehicle for the

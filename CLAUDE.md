@@ -21,9 +21,9 @@ This realises RFC B of loomcycle's v1.x batch — the **UX-movement** counterpar
 
 A Claude Code plugin is **markdown + JSON files in a git repo** — there is **no build step, no npm publish, no TypeScript**. (An earlier draft of the RFC assumed npm; that was corrected — see the RFC's 2026-05-29 revision note.) Structure:
 
-- `.claude-plugin/plugin.json` — the manifest (JSON). ONLY this file lives under `.claude-plugin/`.
-- `.mcp.json` — bundled MCP server config (the loomcycle stdio server).
-- `marketplace.json` — self-marketplace so `/plugin marketplace add denn-gubsky/claude-code-plugin-loomcycle` works against this repo directly.
+- `.claude-plugin/plugin.json` — the plugin manifest (JSON).
+- `.claude-plugin/marketplace.json` — self-marketplace so `/plugin marketplace add denn-gubsky/claude-code-plugin-loomcycle` works against this repo directly. **Must live under `.claude-plugin/`** — Claude Code looks for `.claude-plugin/marketplace.json` and errors "Marketplace file not found" if it's at the repo root. So `.claude-plugin/` holds BOTH JSON manifests.
+- `.mcp.json` — bundled MCP server config (the loomcycle stdio server). Lives at the repo root (referenced by `plugin.json`'s `mcpServers` path).
 - `commands/*.md` — slash commands (frontmatter + body; `$ARGUMENTS`, `$1`, `$2` for args).
 - `skills/<name>/SKILL.md` — skills (frontmatter `description` drives auto-invocation).
 - `hooks/hooks.json` — hooks (PostToolUse, matched against `mcp__loomcycle__<tool>`).
@@ -56,7 +56,7 @@ Distribution: users run `/plugin marketplace add denn-gubsky/claude-code-plugin-
 - Commands/skills are thin: they describe the MCP tool call and the rendering. No logic the runtime should own.
 - `spawn_run` takes `segments` (array), not a `prompt` string — wrap the operator's text as one segment.
 - `list_runs` requires `user_id` — commands must supply it (from `/loomcycle-connect` state or `--user`).
-- **Versioning tracks loomcycle's vector through the v1.x batch** (not an independent plugin semver). First release is `v0.12.8`, matching loomcycle at ship time; bump alongside loomcycle's `v0.X.Y`. **`v1.0.0` is reserved for the v1.x batch release** once the remaining RFCs land — a lone plugin "1.0" would falsely signal the batch is done. Keep `.claude-plugin/plugin.json` + `marketplace.json` versions in sync, and tag releases `vX.Y.Z`. `marketplace.json` keeps `ref: main` during development (installs track latest); pin it to the release tag at v1.0.0.
+- **Versioning tracks loomcycle's vector through the v1.x batch** (not an independent plugin semver). First release is `v0.12.8`, matching loomcycle at ship time; bump alongside loomcycle's `v0.X.Y`. **`v1.0.0` is reserved for the v1.x batch release** once the remaining RFCs land — a lone plugin "1.0" would falsely signal the batch is done. Keep `.claude-plugin/plugin.json` + `.claude-plugin/marketplace.json` versions in sync, and tag releases `vX.Y.Z`. `marketplace.json` keeps `ref: main` during development (installs track latest); pin it to the release tag at v1.0.0.
 - Commit subjects ≤72 chars, imperative, conventional prefix. Close with `Co-Authored-By` when Claude wrote substantial content.
 
 ## When in doubt
