@@ -74,18 +74,21 @@ For `--scopes`, pass the **narrowest** set: a per-app key might be
 
 ## Scope note — depends on the transport
 
-`operatortokendef` is operator-admin-only, but whether that's automatic depends
-on how the plugin's MCP server is wired:
+`operatortokendef` is operator-admin-only. Since 0.21.0 the default stdio
+transport is a **thin client** that proxies to the runtime's `/v1/_mcp`, so
+authority is governed by the **`auth_token` principal on the upstream** — the
+same enforcement as the direct HTTP transport:
 
-- **stdio transport (default `.mcp.json`)** — the MCP server runs in the
-  operator's process and is **single-operator / admin by construction**, so
-  this command **always has admin** here regardless of `auth_token`. You will
-  not get a scope refusal over stdio.
-- **HTTP transport** (`POST /v1/_mcp`, the per-tenant confinement setup in
-  `examples/mcp-http-tenant.json`) — the bearer's principal must carry
-  `substrate:admin`. A narrow-scoped `lct_…` bearer gets a `scope` refusal here
-  — surface it plainly; it is **not** a plugin bug. (A confined per-tenant key
-  is *meant* to be unable to mint tokens.)
+- **admin `auth_token`** (or an **open-mode** runtime with no auth) — the
+  principal carries `substrate:admin`, so this command works. The legacy
+  `LOOMCYCLE_AUTH_TOKEN` resolves to an admin principal, so an operator driving
+  their own runtime keeps full access.
+- **scoped `lct_…` `auth_token`** — a narrow per-tenant bearer lacks
+  `substrate:admin` and gets a `scope` refusal. Surface it plainly; it is **not**
+  a plugin bug (a confined per-tenant key is *meant* to be unable to mint
+  tokens). This applies to **both** the default stdio thin client and the direct
+  HTTP transport in `examples/mcp-http-tenant.json` — both route through the
+  principal-enforced `/v1/_mcp`.
 
 ## After `create` / `rotate` — if this is the plugin's own bearer
 
