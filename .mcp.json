@@ -2,9 +2,9 @@
   "mcpServers": {
     "loomcycle": {
       "command": "${user_config.bin_path}",
-      "args": ["mcp", "--config", "${user_config.config_path}", "--no-http"],
+      "args": ["mcp", "--upstream", "${user_config.base_url}"],
       "env": {
-        "LOOMCYCLE_AUTH_TOKEN": "${user_config.auth_token}"
+        "LOOMCYCLE_MCP_UPSTREAM_TOKEN": "${user_config.auth_token}"
       }
     }
   }

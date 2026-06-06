@@ -2,20 +2,20 @@
 
 Drop-in configurations you apply by hand — they are **not** loaded automatically.
 
-## `mcp-http-tenant.json` — per-tenant confinement (HTTP transport)
+## `mcp-http-tenant.json` — direct HTTP transport (alternative to the stdio proxy)
 
-By default the plugin's `.mcp.json` runs `loomcycle mcp` over **stdio**, which
-loomcycle treats as **single-operator / admin** — the launching process has full
-authority, so wire `tenant_id` / `user_id` are trusted verbatim and no
-per-tenant boundary is enforced (see the README's *Multi-tenant authorization*
-section). That is the right model for an operator driving their own runtime.
+Since 0.21.0 the plugin's default `.mcp.json` runs `loomcycle mcp --upstream`, a
+**thin stdio client** that proxies to the runtime's `POST /v1/_mcp` — which is
+already **principal-enforced**. So to confine the plugin to one tenant you no
+longer need to swap transports: just set `auth_token` to a scoped
+`OperatorTokenDef` (`lct_…`) bearer in the default config and every command runs
+under that token's `{tenant_id, subject, scopes}` principal. An admin token (or
+an open-mode runtime) gives full authority; a narrow token is confined.
 
-To instead run the plugin **confined to one tenant** — every command bound to an
-authoritative `{tenant_id, subject, scopes}` resolved from a scoped
-`OperatorTokenDef` (`lct_…`) bearer — point the **same** `loomcycle` server at
-loomcycle's HTTP MCP transport (`POST /v1/_mcp`), which *is* principal-enforced.
-
-This file is that transport. It keeps the server name `loomcycle`, so all the
+This file is an **alternative**: point the **same** `loomcycle` server directly
+at `POST /v1/_mcp` over HTTP instead of running the local stdio proxy process.
+Functionally equivalent (both hit `/v1/_mcp`); use it if you'd rather not spawn
+the stdio client. It keeps the server name `loomcycle`, so all the
 slash commands work unchanged — they now run under the token's principal:
 
 1. Mint a scoped token (from an admin operator):

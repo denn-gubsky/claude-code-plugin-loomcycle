@@ -4,7 +4,7 @@ This file is loaded by Claude Code on every session in this repo. Read it cold; 
 
 ## Project context
 
-**claude-code-plugin-loomcycle** is the Claude Code-side UX layer for [loomcycle](https://github.com/denn-gubsky/loomcycle), a high-load agentic runtime. It is a **Claude Code plugin** — a git-distributed bundle of slash commands, skills, hooks, and a pre-wired MCP server config. It ships nothing executable of its own: it wraps loomcycle's existing `loomcycle mcp` stdio server and its meta-tools (`mcp__loomcycle__spawn_run`, `…__cancel_run`, `…__list_runs`, snapshot ops, `…__evaluation`, `…__agentdef`, etc.).
+**claude-code-plugin-loomcycle** is the Claude Code-side UX layer for [loomcycle](https://github.com/denn-gubsky/loomcycle), a high-load agentic runtime. It is a **Claude Code plugin** — a git-distributed bundle of slash commands, skills, hooks, and a pre-wired MCP server config. It ships nothing executable of its own: since 0.21.0 it wires `loomcycle mcp --upstream <base_url>` as a **thin client** — a stdio↔`/v1/_mcp` proxy to a running loomcycle runtime that boots NO runtime of its own (loomcycle RFC R single-runtime invariant) — and exposes its meta-tools (`mcp__loomcycle__spawn_run`, `…__cancel_run`, `…__list_runs`, snapshot ops, `…__evaluation`, `…__agentdef`, etc.).
 
 This realises RFC B of loomcycle's v1.x batch — the **UX-movement** counterpart to RFC C's **data-movement** (`loomcycle import claude-code`). C moves authoring content into loomcycle; this plugin moves *runtime control* into the IDE.
 
@@ -12,7 +12,7 @@ This realises RFC B of loomcycle's v1.x batch — the **UX-movement** counterpar
 
 | Repo | Role |
 |---|---|
-| `loomcycle` (Go) | The runtime + the `loomcycle mcp` stdio server this plugin wraps |
+| `loomcycle` (Go) | The runtime; the plugin runs `loomcycle mcp --upstream` as a thin client of it (proxies to `/v1/_mcp`, no second runtime) |
 | **this repo** | Claude Code plugin: commands / skills / hooks / MCP wiring |
 | `loomcycle-internal` (Gitea) | RFCs / design history — `doc-internal/rfcs/claude-code-plugin.md` is the spec |
 | `n8n-nodes-loomcycle` | Sibling integration; the repo-hygiene template this repo borrows from |

@@ -1,7 +1,7 @@
 {
   "name": "loomcycle",
   "displayName": "loomcycle",
-  "version": "0.20.3",
+  "version": "0.21.0",
   "description": "Drive a loomcycle agentic runtime from inside Claude Code — spawn/cancel/list runs, snapshot, evaluate, inspect memory, mint multi-tenant operator tokens, and import .claude/ repos, all via slash commands and skills over loomcycle's bundled MCP server.",
   "author": {
     "name": "Dennis Gubsky",
@@ -22,20 +22,20 @@
     },
     "config_path": {
       "type": "string",
-      "title": "loomcycle.yaml path",
-      "description": "Path to your loomcycle config. Relative paths resolve against the project directory.",
+      "title": "loomcycle.yaml path (legacy)",
+      "description": "Reserved. The plugin runs as a thin client (--upstream) and no longer loads a config itself — the running runtime owns the config. Kept for compatibility / embedded fallback.",
       "default": "loomcycle.yaml"
     },
     "auth_token": {
       "type": "string",
-      "title": "LOOMCYCLE_AUTH_TOKEN",
-      "description": "Bearer token for loomcycle's /v1/* endpoints. Stored in your OS keychain, never in the repo.",
+      "title": "loomcycle bearer token",
+      "description": "Bearer for loomcycle's /v1/* endpoints, sent by the thin client to the upstream runtime (as LOOMCYCLE_MCP_UPSTREAM_TOKEN). Its principal governs what the plugin can do (an admin token → full authority; a scoped lct_… token → confined). Stored in your OS keychain, never in the repo.",
       "sensitive": true
     },
     "base_url": {
       "type": "string",
-      "title": "loomcycle base URL",
-      "description": "Base URL of a running loomcycle instance, used by the optional auto-snapshot hook (e.g. http://127.0.0.1:8787).",
+      "title": "loomcycle base URL (upstream runtime)",
+      "description": "Base URL of the running loomcycle runtime the plugin proxies to (e.g. http://127.0.0.1:8787). REQUIRED — the plugin is a thin client and boots no runtime of its own; a loomcycle instance must be reachable here.",
       "default": "http://127.0.0.1:8787"
     }
   }

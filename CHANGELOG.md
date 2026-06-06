@@ -4,6 +4,37 @@ All notable changes to this project are documented here. The format follows
 [Keep a Changelog](https://keepachangelog.com/) and the project adheres to
 [Semantic Versioning](https://semver.org/).
 
+## [0.21.0] — 2026-06-06
+
+**Thin-client MCP wiring — the plugin no longer boots a second loomcycle
+runtime (loomcycle RFC R single-runtime invariant).**
+
+Previously the plugin launched `loomcycle mcp --config … --no-http`, which booted
+a *full second runtime* (listener muted) alongside your real one. Two runtimes
+sharing one state each have their own in-process event bus, so a resolved
+interruption or a cancel raised on one never wakes a run owned by the other —
+the root of the "session wedged / interruption never resumes" failures, plus
+accumulating rogue runtimes.
+
+### Changed
+- **`.mcp.json` now launches `loomcycle mcp --upstream ${base_url}`** — a thin
+  stdio↔`/v1/_mcp` proxy to the loomcycle runtime already running at `base_url`.
+  It boots **no runtime of its own** (no providers, scheduler, sweepers, port).
+  The `auth_token` is sent to the upstream as `LOOMCYCLE_MCP_UPSTREAM_TOKEN`.
+- **`base_url` is now required** (the upstream runtime the plugin proxies to);
+  `config_path` is legacy/reserved (the thin client loads no config).
+- **Multi-tenant is simpler:** the default stdio transport now routes through the
+  principal-enforced `/v1/_mcp`, so authority is governed by the `auth_token`
+  principal — set a scoped `lct_…` token to confine the plugin to one tenant; no
+  `.mcp.json` swap needed. The HTTP example remains a valid alternative transport.
+
+### Breaking
+- **Requires a loomcycle build that supports `loomcycle mcp --upstream`** (RFC R).
+  On an older build the flag is unknown and the server errors at launch — pin
+  0.20.x or upgrade loomcycle.
+- **A loomcycle instance must be running at `base_url`** — the plugin no longer
+  starts one. Start it separately (`loomcycle` / `brew services` / Docker).
+
 ## [0.20.3] — 2026-06-04
 
 **Fix: "Duplicate hooks file detected" on load.** Newer Claude Code builds

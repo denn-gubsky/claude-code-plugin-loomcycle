@@ -40,18 +40,26 @@ At install you'll be prompted for:
 | userConfig | Purpose | Default |
 |---|---|---|
 | `bin_path` | Path to the loomcycle binary | `loomcycle` (PATH lookup) |
-| `config_path` | Path to your `loomcycle.yaml` | `loomcycle.yaml` (project dir) |
-| `auth_token` | `LOOMCYCLE_AUTH_TOKEN` bearer (stored in your OS keychain, **never** the repo) | — |
-| `base_url` | loomcycle base URL for the optional auto-snapshot hook | `http://127.0.0.1:8787` |
+| `base_url` | **Upstream runtime URL** the plugin proxies to — a loomcycle instance must be running here | `http://127.0.0.1:8787` |
+| `auth_token` | Bearer sent to the upstream (as `LOOMCYCLE_MCP_UPSTREAM_TOKEN`); its principal governs what the plugin can do. OS keychain, **never** the repo | — |
+| `config_path` | *Legacy / reserved* — the thin client loads no config of its own | `loomcycle.yaml` |
 
-The bundled MCP server entry (`.mcp.json`) then launches
-`loomcycle mcp --config <config_path> --no-http` automatically when the plugin
-is enabled. The `--no-http` flag suppresses the runtime's HTTP listener — the
-plugin drives the server entirely over stdio, so it needs no TCP port. This
-keeps the MCP server from colliding with a separately-running loomcycle
-instance on the default `127.0.0.1:8787` (e.g. your real server started via
-`loomcycle`/`brew services`, or another project's). Without it, every enabled
-plugin session would try to bind `8787` and fight whatever already owns it.
+The bundled MCP server entry (`.mcp.json`) launches
+`loomcycle mcp --upstream <base_url>` automatically when the plugin is enabled.
+This is a **thin client** (loomcycle RFC R): it runs a stdio↔`/v1/_mcp` proxy to
+the loomcycle runtime already running at `base_url` and **boots no runtime of its
+own** — no providers, scheduler, sweepers, or port to bind.
+
+> **Single-runtime invariant.** Earlier versions launched
+> `loomcycle mcp --config … --no-http`, which booted a *full second runtime*
+> (listener muted) next to your real one. Two runtimes sharing one state each
+> have their own in-process event bus, so a resolved interruption or a cancel
+> raised on one never wakes a run owned by the other — the source of the
+> "session wedged / interruption never resumes" failures. The thin client fixes
+> this structurally: there is exactly one runtime, and the plugin is its client.
+> **You must have a loomcycle instance running at `base_url`** (start it
+> separately via `loomcycle`/`brew services`/Docker); the plugin no longer
+> starts one. Requires a loomcycle build that supports `loomcycle mcp --upstream`.
 
 ## Commands
 
@@ -96,16 +104,21 @@ loomcycle v0.17.0 (RFC L) adds per-principal bearer tokens (`OperatorTokenDef`,
 **from the token**. How much of that the plugin enforces depends entirely on
 **which transport** the bundled MCP server uses:
 
+Since 0.21.0 the default stdio transport is a **thin client** that proxies to the
+runtime's `POST /v1/_mcp` — the **same principal-enforced path** as the direct
+HTTP transport. So the plugin's authority is governed by the **token's principal
+on the upstream**, regardless of transport:
+
 | Transport | What the plugin is | Isolation / scopes |
 |---|---|---|
-| **stdio** (default `.mcp.json`: `loomcycle mcp`) | **single-operator / admin** — the launching process has full authority | **None enforced at the plugin.** Wire `tenant_id` / `user_id` are trusted verbatim; the plugin can act across the whole instance. Correct for driving *your own* runtime. |
-| **HTTP** (`POST /v1/_mcp`, see [examples/mcp-http-tenant.json](examples/mcp-http-tenant.json)) | a **confined principal** | **Full.** `applyPrincipal` overrides any wider wire value; under-scoped calls get a `scope` refusal; reads are tenant-filtered. |
+| **stdio thin client** (default `.mcp.json`: `loomcycle mcp --upstream`) | a proxy to the runtime's `/v1/_mcp` | **Principal-enforced by `auth_token`.** An admin token (or an open-mode runtime) → full authority; a scoped `lct_…` token → confined (`applyPrincipal` overrides wider wire values; under-scoped calls get a `scope` refusal; reads tenant-filtered). |
+| **HTTP** (`POST /v1/_mcp` direct, see [examples/mcp-http-tenant.json](examples/mcp-http-tenant.json)) | same `/v1/_mcp`, direct transport (no local stdio process) | Same principal enforcement. |
 
-**To confine the plugin to one tenant**, swap the `loomcycle` server to the HTTP
-transport and set `auth_token` to a scoped `lct_…` bearer — see
-[examples/mcp-http-tenant.json](examples/mcp-http-tenant.json). It is a *swap*,
-not a second server: a differently-named server would not back the
-`mcp__loomcycle__*` commands.
+**To confine the plugin to one tenant**, just set `auth_token` to a scoped
+`lct_…` bearer in the default config — no `.mcp.json` swap needed any more, since
+the default already routes through the principal-enforced `/v1/_mcp`. (The
+[HTTP example](examples/mcp-http-tenant.json) remains a valid alternative
+transport if you'd rather not run the stdio proxy process.)
 
 ### Token rotation runbook
 
@@ -138,6 +151,7 @@ claude plugin validate ./claude-code-plugin-loomcycle   # validate before publis
 
 | This plugin | loomcycle | Claude Code |
 |---|---|---|
+| 0.21.0 | **Requires a loomcycle build with `loomcycle mcp --upstream`** (RFC R thin client). The plugin no longer boots a runtime — a loomcycle instance must be running at `base_url`. On a build without `--upstream`, the flag is unknown and the server errors at launch — pin 0.20.x or upgrade loomcycle. | ≥ 2.1 |
 | 0.20.2 | as 0.20.1, **plus** the `loomcycle mcp --no-http` flag (verified on v0.22.0). On an older build that doesn't recognise `--no-http`, the server errors at launch — pin 0.20.1 or upgrade loomcycle. | ≥ 2.1 |
 | 0.20.1 | ≥ v0.12.x (`loomcycle mcp` + meta-tools); memory `add`/`recall` need ≥ v0.16; `operator-token` needs ≥ v0.17 | ≥ 2.1 |
 
