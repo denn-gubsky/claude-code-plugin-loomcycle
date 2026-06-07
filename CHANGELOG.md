@@ -4,6 +4,38 @@ All notable changes to this project are documented here. The format follows
 [Keep a Changelog](https://keepachangelog.com/) and the project adheres to
 [Semantic Versioning](https://semver.org/).
 
+## [Unreleased]
+
+**`loomcycle-configure` skill — inbound webhooks, third-party MCP servers, and
+the second tool-gating layer.** Docs-only; grounded in loomcycle v0.23.0 source
++ a hands-on Gitea-webhook integration run.
+
+### Added
+- **`skills/loomcycle-configure/reference/webhooks.md`** — new reference for the
+  `webhooks:` block (enable → `POST /v1/_webhooks/{name}`; the
+  `enabled: true` + `delivery:` requirement; the HMAC signing-secret gate
+  `LOOMCYCLE_SCHEDULER_ENV_ALLOWLIST`; `payload_mapping.goal` — incl. `goal: "$"`
+  to deliver the whole signed body; `recent-deliveries`/`test` triage; `tenant_id`
+  trust boundary; tailnet ingress with no relay) **and** the `mcp_servers:` block
+  (stdio/http, `mcp__<server>__<tool>`, per-run `${run.credentials.*}` headers).
+
+### Changed
+- **The `${}` YAML-interpolation allowlist is now documented** (routing.md +
+  webhooks.md): only `LOOMCYCLE_`-prefixed names plus the hardcoded
+  `BRAVE_API_KEY`/`GITHUB_TOKEN`/`SLACK_BOT_TOKEN`/`PG_DSN`/`REDIS_URL` expand;
+  provider keys are deliberately **not** interpolable. Maps the common
+  `FOO: "${LOOMCYCLE_FOO}"` workaround for non-prefixed MCP secrets.
+- **The two-layer default-deny is now explicit** (SKILL.md safety rule #3 +
+  profiles.md §3): capability tools (`Memory`/`Channel`/`AgentDef`/…) need an
+  agent-level scope list (`memory_scopes`/`channels`/`agent_def_scopes`) **on top
+  of** `allowed_tools` and the operator tool-enable.
+- **env-vars.md** — `LOOMCYCLE_SCHEDULER_ENV_ALLOWLIST` documented as the shared
+  scheduler+webhook+mem9 secret gate (and the *only* one — no
+  `LOOMCYCLE_ENV_ALLOWLIST`, no yaml `env_allowlist:`); added
+  `LOOMCYCLE_CHANNELS_LONGPOLL_CAP_MS` and a `memory_scopes` default-deny note.
+- **SKILL.md** — frontmatter description now covers webhooks + third-party MCP so
+  the skill auto-loads for those tasks.
+
 ## [0.21.0] — 2026-06-06
 
 **Thin-client MCP wiring — the plugin no longer boots a second loomcycle

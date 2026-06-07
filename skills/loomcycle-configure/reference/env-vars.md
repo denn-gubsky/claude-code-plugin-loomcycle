@@ -68,6 +68,18 @@ never in a repo file.
 | `LOOMCYCLE_MEMORY_MAX_SCOPE_BYTES` | 1048576 | Per-(scope,scope_id) byte cap; per-agent `memory_quota_bytes` overrides. |
 | `LOOMCYCLE_MEMORY_SWEEP_MS` | 900000 | TTL reaper cadence. Read paths filter expired rows even when off. |
 
+> **`memory_scopes` is default-deny (an agent-yaml gate, not an env var).** These
+> env vars only tune limits — they do **not** grant access. An agent with
+> `Memory` in `allowed_tools` but **no** `memory_scopes:` list sees every Memory
+> call refused. Give it `memory_scopes: [agent]` (and/or `user`) to enable it
+> (the second default-deny layer — see SKILL.md safety rule #3).
+
+## Channels
+
+| Var | Default | Purpose |
+|---|---|---|
+| `LOOMCYCLE_CHANNELS_LONGPOLL_CAP_MS` | 30000 | Server cap on a `Channel.subscribe` `wait_ms`. The default 30 s forces a parked subscriber to re-subscribe every 30 s, burning `max_iterations` on a long-idle agent — raise it (e.g. `180000`) for webhook/event-driven agents that block waiting for a signal. (Channel access itself is gated per-agent by the `channels:` publish/subscribe ACL — default-deny.) |
+
 ## Concurrency, fairness, provider timeouts
 
 | Var | Default | Purpose |
@@ -83,8 +95,9 @@ never in a repo file.
 
 | Var | Purpose |
 |---|---|
-| `LOOMCYCLE_SCHEDULER_ENABLED` / `_TICK_SECONDS` / `_FIRE_TIMEOUT_SECONDS` / `_ENV_ALLOWLIST` | Scheduled runs (RFC E). Env-allowlist gates which env vars schedules may reference. |
-| `LOOMCYCLE_WEBHOOKS_ENABLED` | Inbound webhooks (RFC H). Off by default. |
+| `LOOMCYCLE_SCHEDULER_ENABLED` / `_TICK_SECONDS` / `_FIRE_TIMEOUT_SECONDS` | Scheduled runs (RFC E). |
+| `LOOMCYCLE_SCHEDULER_ENV_ALLOWLIST` | **The shared trigger-credential gate.** Comma-separated env-var NAMES that scheduler **and webhook** defs may resolve as secrets (signing secrets, per-run MCP bearers) — and the mem9 memory backend's API key. A name not listed is **never read**. This is the *only* knob: there is no yaml `env_allowlist:` key and no `LOOMCYCLE_ENV_ALLOWLIST` / `LOOMCYCLE_WEBHOOKS_ENV_ALLOWLIST` (both read nowhere — don't reach for the intuitive name). A webhook whose `signing_secret_env` isn't here fails `503 secret_unresolvable` (boot log: `env_allowlist=0 names`). **Separate from the `${}` yaml-interpolation allowlist** — see [webhooks.md](webhooks.md). |
+| `LOOMCYCLE_WEBHOOKS_ENABLED` | Inbound webhooks (RFC H). `1` mounts `POST /v1/_webhooks/{name}`. Off by default. Full config in [webhooks.md](webhooks.md). |
 | `LOOMCYCLE_A2A_ENABLED` / `_SERVER_CARD` / `_PUBLIC_BASE_URL` / `_TENANCY_ROUTING` | Agent2Agent protocol (RFC G). `_TENANCY_ROUTING=host|path` for per-route tenancy. |
 
 ## Multi-tenant authorization (RFC L)

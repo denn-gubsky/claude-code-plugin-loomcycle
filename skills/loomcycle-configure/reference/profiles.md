@@ -130,6 +130,16 @@ root, or specific `mcp__*` tools). Run inside the profile-2 container, add
 seccomp/read-only-rootfs/`--cap-drop=ALL` at the container layer, and keep the
 listener bound to loopback behind your app.
 
+**The capability tools have a *second* default-deny gate.** Beyond the operator
+tool-enable (Bash/Read/Write/HTTP env vars) and the agent `allowed_tools`,
+`Memory` / `Channel` / `AgentDef` / `ScheduleDef` each refuse until the agent
+*also* carries an explicit scope list — `memory_scopes:`, `channels:` (per-side
+publish/subscribe ACL), `agent_def_scopes:` (`self`/`descendants`/`named:<n>`/
+`any`). Listing the tool in `allowed_tools` is necessary but **not** sufficient.
+This is least-privilege working *for* you here: an agent you didn't scope can't
+touch memory or the bus even if its `allowed_tools` say `Memory`/`Channel`. Add
+scopes deliberately, narrowest first.
+
 **Sharp edges:** loomcycle's docs are explicit — Bash is *not* a sandbox; if you
 need shell-like behavior for untrusted prompts, you want code-js or a separate
 hardened container, not `LOOMCYCLE_BASH_ENABLED=1`.

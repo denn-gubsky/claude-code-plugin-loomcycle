@@ -19,6 +19,17 @@ loomcycle's config loader — do not invent fields.
 A provider with no API key set is marked **excluded** (treated like unreachable)
 and skipped by the resolver. Only set keys for providers you'll use.
 
+> **Provider keys are referenced by env-var name, never `${}`-interpolated.**
+> A provider key reaches its driver through loomcycle's `Env` struct — there is
+> no `api_key: ${ANTHROPIC_API_KEY}` field, and the yaml `${}` expander
+> deliberately **excludes** provider keys (so a malicious shared yaml can't
+> `${ANTHROPIC_API_KEY}` a secret into an outbound MCP header). `${}`
+> interpolation is for `mcp_servers:` (and other outbound string fields) only,
+> and is itself allowlisted — any `LOOMCYCLE_`-prefixed name plus the hardcoded
+> set `BRAVE_API_KEY` / `GITHUB_TOKEN` / `SLACK_BOT_TOKEN` / `PG_DSN` /
+> `REDIS_URL`; every other name passes through verbatim. See
+> [webhooks.md](webhooks.md) for the MCP-server secret-injection pattern.
+
 ## The 4-layer resolver precedence (highest → lowest)
 
 The resolver picks `(provider, model)` per run. First layer with something to
