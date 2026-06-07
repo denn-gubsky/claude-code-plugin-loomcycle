@@ -7,17 +7,20 @@ All notable changes to this project are documented here. The format follows
 ## [Unreleased]
 
 **`loomcycle-configure` skill — inbound webhooks, third-party MCP servers, and
-the second tool-gating layer.** Docs-only; grounded in loomcycle v0.23.0 source
-+ a hands-on Gitea-webhook integration run.
+the second tool-gating layer.** Docs-only; grounded in loomcycle **v0.23.1**
+source + a hands-on Gitea-webhook integration run.
 
 ### Added
 - **`skills/loomcycle-configure/reference/webhooks.md`** — new reference for the
   `webhooks:` block (enable → `POST /v1/_webhooks/{name}`; the
-  `enabled: true` + `delivery:` requirement; the HMAC signing-secret gate
-  `LOOMCYCLE_SCHEDULER_ENV_ALLOWLIST`; `payload_mapping.goal` — incl. `goal: "$"`
-  to deliver the whole signed body; `recent-deliveries`/`test` triage; `tenant_id`
-  trust boundary; tailnet ingress with no relay) **and** the `mcp_servers:` block
-  (stdio/http, `mcp__<server>__<tool>`, per-run `${run.credentials.*}` headers).
+  `enabled: true` + `delivery:` requirement; the **v0.23.1** three-rule
+  secret-resolution model — `LOOMCYCLE_*` verify auto-allow, static-yaml
+  auto-trust, explicit `LOOMCYCLE_WEBHOOKS_ENV_ALLOWLIST` / scheduler twin — and
+  the new `auth.kind: none` trusted-network ingress; `payload_mapping.goal`
+  incl. `goal: "$"` to deliver the whole signed body; `recent-deliveries`/`test`
+  triage; `tenant_id` trust boundary; tailnet ingress with no relay) **and** the
+  `mcp_servers:` block (stdio/http, `mcp__<server>__<tool>`, per-run
+  `${run.credentials.*}` headers).
 
 ### Changed
 - **The `${}` YAML-interpolation allowlist is now documented** (routing.md +
@@ -29,10 +32,10 @@ the second tool-gating layer.** Docs-only; grounded in loomcycle v0.23.0 source
   profiles.md §3): capability tools (`Memory`/`Channel`/`AgentDef`/…) need an
   agent-level scope list (`memory_scopes`/`channels`/`agent_def_scopes`) **on top
   of** `allowed_tools` and the operator tool-enable.
-- **env-vars.md** — `LOOMCYCLE_SCHEDULER_ENV_ALLOWLIST` documented as the shared
-  scheduler+webhook+mem9 secret gate (and the *only* one — no
-  `LOOMCYCLE_ENV_ALLOWLIST`, no yaml `env_allowlist:`); added
-  `LOOMCYCLE_CHANNELS_LONGPOLL_CAP_MS` and a `memory_scopes` default-deny note.
+- **env-vars.md** — the webhook secret-gate vars documented for **v0.23.1**:
+  `LOOMCYCLE_SCHEDULER_ENV_ALLOWLIST` (shared trigger gate) plus the new
+  `LOOMCYCLE_WEBHOOKS_ENV_ALLOWLIST` twin and `LOOMCYCLE_WEBHOOKS_ALLOW_UNAUTHENTICATED`;
+  added `LOOMCYCLE_CHANNELS_LONGPOLL_CAP_MS` and a `memory_scopes` default-deny note.
 - **SKILL.md** — frontmatter description now covers webhooks + third-party MCP so
   the skill auto-loads for those tasks.
 

@@ -4,10 +4,12 @@ Two `loomcycle.yaml` blocks that let an instance talk to the outside world:
 `webhooks:` (an external POST starts/wakes an agent) and `mcp_servers:` (agents
 call out to third-party tools). They share one seam — **operator-owned secrets,
 referenced by env-var name, never written into the yaml** — but they gate those
-secrets through **two different allowlists**, which is the #1 thing operators
-trip on. Authoritative source: loomcycle `Context.help input-webhooks` +
-`docs/CONFIGURATION.md` + `internal/config/config.go`. Field names below match
-the config loader.
+secrets through **two different mechanisms** (webhook secret-resolution rules
+vs. the `${}` interpolation allowlist), which is the #1 thing operators conflate.
+Authoritative source: loomcycle `Context.help input-webhooks` +
+`docs/CONFIGURATION.md` + `internal/api/webhook/allowlist.go` +
+`internal/config/config.go` (verified against the **v0.23.1** F23 fix). Field
+names below match the config loader.
 
 ---
 
@@ -53,34 +55,77 @@ inactive** → the URL returns an opaque `404 unknown_webhook` (no enumeration
 oracle). Static yaml defs are read directly; they do **not** bootstrap rows into
 the `webhook_defs` DB table, so don't go looking for them there.
 
-### The signing secret — gate #1: `LOOMCYCLE_SCHEDULER_ENV_ALLOWLIST`
+### The signing secret — how a name is authorized (the #1 setup snag)
 
 `signing_secret_env` (hmac) / `bearer_token_env` (bearer) name an env var the
-receiver resolves **at verify time** — but only if that name is on the
-**scheduler env allowlist**:
+receiver resolves **at verify time** — but only if that name is *authorized*.
+As of **loomcycle v0.23.1** the receiver authorizes a name when **any one** of
+three rules holds (verified against `internal/api/webhook/allowlist.go` +
+`config.go`):
+
+1. **`LOOMCYCLE_*`-prefixed** (or a known third-party name — `GITHUB_TOKEN` etc.)
+   — auto-allowed **for the verification secret only** (`signing_secret_env` /
+   `bearer_token_env`, consumed by the receiver, never reaches the agent). This
+   is why `signing_secret_env: "LOOMCYCLE_GITEA_WEBHOOK_SECRET"` **Just Works
+   with zero allowlist config.**
+2. **Declared by a static (yaml) webhook** — a static def's own secret +
+   `user_credentials_from_env` names are auto-trusted (the operator wrote the
+   yaml). So a static webhook resolves *all* its env names with no allowlist.
+3. **Explicitly listed** in **`LOOMCYCLE_WEBHOOKS_ENV_ALLOWLIST`** (the
+   correctly-named knob) or the scheduler's shared
+   **`LOOMCYCLE_SCHEDULER_ENV_ALLOWLIST`** — comma-separated, merged as a union.
 
 ```bash
-LOOMCYCLE_SCHEDULER_ENV_ALLOWLIST=LOOMCYCLE_GITEA_WEBHOOK_SECRET,LOOMCYCLE_STRIPE_WEBHOOK_SECRET
+# Only needed for a NON-LOOMCYCLE_-named secret, or an agent-reachable credential
+# on a RUNTIME-authored (webhookdef-tool) def — both fall outside rules 1 & 2:
+LOOMCYCLE_WEBHOOKS_ENV_ALLOWLIST=GITEA_WEBHOOK_SECRET,STRIPE_WH_SECRET
 ```
 
-This one env var is the **shared trigger-credential gate** for the scheduler,
-the webhook receiver, *and* the mem9 memory backend (`config.go` populates a
-single `SchedulerEnvAllowlist`; `main.go` hands the same set to the webhook
-receiver). Sharp edges, all verified against source:
+Sharp edges that remain:
 
-- It is the **only** knob. There is **no** yaml `env_allowlist:` key, and **no**
-  hardcoded "recognized webhook-secret names" bypass — a name like
-  `LOOMCYCLE_GITHUB_WEBHOOK_SECRET` still must appear in this list. A secret not
-  on the list is **never read** → `503 secret_unresolvable` (the response names
-  the env var, never its value) and the boot log shows `env_allowlist=0 names`.
-- The intuitively-named `LOOMCYCLE_ENV_ALLOWLIST` / `LOOMCYCLE_WEBHOOKS_ENV_ALLOWLIST`
-  are read **nowhere** — the scheduler-named var is the real one. (A CLI hint
-  pointing at the former is stale.) **Don't reach for the obvious name.**
-- This gate (secret-name → value resolution) is **separate** from the `${}`
-  interpolation allowlist below. A `LOOMCYCLE_`-prefixed name passes `${}`
-  expansion automatically, but that does **not** make it resolvable as a webhook
-  secret — it must *also* be in `LOOMCYCLE_SCHEDULER_ENV_ALLOWLIST`. Two
-  allowlists, two purposes; do not conflate them.
+- **Agent-reachable creds on a *runtime*-authored def are still strictly gated.**
+  Rule 1's namespace auto-allow covers only the verification secret. A
+  `user_credentials_from_env` value on a def created via the `webhookdef` tool
+  (not yaml) must be named in `LOOMCYCLE_WEBHOOKS_ENV_ALLOWLIST` explicitly — so
+  a less-trusted authoring path can't inject an arbitrary env var into a run.
+- A name authorized by none of the three rules → `503 secret_unresolvable`
+  (names the env var, never its value). The **boot log now names both allowlist
+  vars, the live seeded count, and prints a `WARNING:` line per static webhook
+  whose secret won't resolve** — read it; it tells you exactly which knob to set.
+- This secret-resolution allowlist is conceptually distinct from the `${}`
+  yaml-interpolation allowlist (below), but both honor the `LOOMCYCLE_*`
+  namespace, so a `LOOMCYCLE_`-named secret sails through both.
+
+> **Version note.** The three-rule model + the boot warnings are **v0.23.1**.
+> On **v0.23.0 and earlier** the receiver read *only*
+> `LOOMCYCLE_SCHEDULER_ENV_ALLOWLIST`, static secrets were **not** auto-trusted,
+> and a bare `env_allowlist=0 names` was the only clue — the original F23 trap.
+> If an operator is on v0.23.0, fall back to listing the secret there.
+
+### Trusted-network ingress — `auth.kind: none` (v0.23.1)
+
+When the receiver is reachable **only** over an already-authenticated transport
+(a WireGuard/tailnet hop, an mTLS mesh) HMAC is redundant. Set `auth.kind: none`
+to skip signature verification:
+
+```yaml
+  internal-pr:
+    enabled: true
+    delivery: spawn
+    agent: code-reviewer
+    auth: { kind: none }           # no signing secret
+    payload_mapping: { goal: "$" }
+```
+
+It is **refused by default** (`503 unauthenticated_mode_disabled`) — the
+receiver never silently accepts unsigned external POSTs. Opt in explicitly:
+
+```bash
+LOOMCYCLE_WEBHOOKS_ALLOW_UNAUTHENTICATED=1
+```
+
+Only do this when the listen surface is genuinely private (e.g. bound to a
+tailnet IP behind WireGuard). For a publicly-reachable receiver, keep HMAC.
 
 ### Payload delivery — the spawned agent's prompt is the mapped `goal`
 
@@ -235,7 +280,8 @@ yaml-load (the `.` can't match the `${}` name regex, so they survive verbatim)
 | Symptom | Cause | Fix |
 |---|---|---|
 | webhook URL → `404 unknown_webhook` | def missing `enabled: true` or `delivery:` | add both to the `webhooks:` entry |
-| webhook → `503 secret_unresolvable`, boot log `env_allowlist=0` | secret env not allowlisted | add the name to `LOOMCYCLE_SCHEDULER_ENV_ALLOWLIST` (NOT `LOOMCYCLE_ENV_ALLOWLIST`) |
+| webhook → `503 secret_unresolvable` (v0.23.1: see the boot `WARNING:` line) | secret name authorized by none of the 3 rules | name it `LOOMCYCLE_*`, declare it in a static yaml def, or add it to `LOOMCYCLE_WEBHOOKS_ENV_ALLOWLIST` |
+| webhook → `503 unauthenticated_mode_disabled` | `auth.kind: none` without the opt-in | set `LOOMCYCLE_WEBHOOKS_ALLOW_UNAUTHENTICATED=1` (only on a private listen surface) |
 | spawned agent gets an **empty** task | no `payload_mapping.goal` | add `payload_mapping: { goal: "$" }` (or a specific path) |
 | MCP server `401`s; header shows literal `${FOO}` | non-allowlisted `${}` name | rename secret to `LOOMCYCLE_*` and map it: `FOO: "${LOOMCYCLE_FOO}"` |
 | external sender can't reach the receiver | `LISTEN_ADDR=127.0.0.1` | bind a reachable IP (tailnet IP for a tailnet sender; no relay needed) |
