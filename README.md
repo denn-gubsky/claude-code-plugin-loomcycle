@@ -170,6 +170,13 @@ it's a feature request on the loomcycle repo — the plugin ships no workarounds
   Code spawns MCP servers with a sparse environment; if your yaml uses
   `${...}` env placeholders, populate them or wrap the binary in a script that
   sources your env first.
+- **An `env` change in `settings.json` / `settings.local.json` didn't take
+  effect** — the respawned `loomcycle mcp` server inherits the environment Claude
+  Code itself started with, so a `/reload-plugins` does **not** re-read
+  `settings`-supplied env (e.g. `LOOMCYCLE_LISTEN_ADDR`,
+  `LOOMCYCLE_MCP_ALLOW_PRIVILEGED_TOOLS`). Only a **full Claude Code restart**
+  picks up a changed `settings` `env`. (Exporting the var in the shell that
+  launches Claude Code, then restarting, is the reliable path.)
 - **`list_runs` errors** — it requires `user_id`. Set one via
   `/loomcycle:connect --user=<id>` or pass `--user=` on the command.
 - **Bearer / auth** — the API bearer lives in your OS keychain via the
