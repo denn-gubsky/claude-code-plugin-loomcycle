@@ -14,7 +14,7 @@ loomcycle's config loader — do not invent fields.
 | `gemini` | `GEMINI_API_KEY` | generativelanguage.googleapis.com | Production. |
 | `ollama` | `OLLAMA_API_KEY` (Bearer) | `OLLAMA_CLOUD_BASE_URL` (default ollama.com) | Hosted Ollama (subscription billing). |
 | `ollama-local` | none (local trust) | `OLLAMA_BASE_URL` (default `http://localhost:11434`; `disabled` to opt out) | Local-network Ollama. |
-| `anthropic-oauth-dev` | OAuth (`loomcycle anthropic login`) | api.anthropic.com | **Research/dev ONLY**, opt-in via `LOOMCYCLE_ANTHROPIC_OAUTH_DEV_ENABLED=1`. Single-machine. **Never** for production, multi-tenant, multi-replica, or customer-facing. Reverse-engineered subscription billing; no SLA. |
+| `anthropic-oauth-dev` | OAuth (`loomcycle anthropic login`) | api.anthropic.com | **Research/dev ONLY**, opt-in via `LOOMCYCLE_ANTHROPIC_OAUTH_DEV_ENABLED=1`. Single-machine. **Never** for production, multi-tenant, multi-replica, or customer-facing. Reverse-engineered subscription billing; no SLA. Verify a live token server-side with `loomcycle anthropic status --probe` (post-v0.23.0, F6 — plain `status` reports only local file metadata); concurrent loomcycle processes share the token file safely via a cross-process refresh lock (F7). |
 
 A provider with no API key set is marked **excluded** (treated like unreachable)
 and skipped by the resolver. Only set keys for providers you'll use.

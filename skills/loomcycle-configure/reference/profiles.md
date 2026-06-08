@@ -25,7 +25,9 @@ loomcycle init      # writes a starter loomcycle.yaml + README in the config dir
 loomcycle doctor    # verify
 ```
 
-Env (operator adds to `.env.local`, sourced by `loomcycle.sh`):
+Env (secrets → `.env.local`; non-secret config → `.env.insecure`; both sourced by
+`loomcycle.sh`. Post-v0.23.0 split — see [env-vars.md](env-vars.md); a v0.23.0
+binary uses one `.env.local`):
 
 ```bash
 LOOMCYCLE_LISTEN_ADDR=127.0.0.1:8787          # local only
@@ -48,6 +50,17 @@ Storage: SQLite (`LOOMCYCLE_DATA_DIR=./data`, the default). Agents may list
 **Sharp edges:** Bash is cwd-restricted but *not isolated* — anything your user
 can do, a prompt can do. Fine here because you trust the prompts. The moment
 prompts come from elsewhere, move to profile 2 or 3.
+
+**Launch loomcycle from your write/read root.** Relative paths in
+`Read`/`Write`/`Edit` resolve against the loomcycle **process's** current working
+directory — **not** against `LOOMCYCLE_WRITE_ROOT`/`READ_ROOT` (those are the
+absolute *jail* the fully-resolved path must fall inside, not the base a relative
+path is joined to). Start the process from a different dir than the jail root and
+a relative `Write ./foo` (joined to the process CWD) and `Bash` (running in
+`LOOMCYCLE_BASH_CWD`) can land in **different** places — the offset that scattered
+files in the experiments harness. Launch from the dir you set as the root (so
+process CWD == jail root == `LOOMCYCLE_BASH_CWD`), or have agents use absolute
+paths (post-v0.23.0 `docs/TOOLS.md` clarifies this; F13).
 
 ---
 
@@ -138,7 +151,11 @@ publish/subscribe ACL), `agent_def_scopes:` (`self`/`descendants`/`named:<n>`/
 `any`). Listing the tool in `allowed_tools` is necessary but **not** sufficient.
 This is least-privilege working *for* you here: an agent you didn't scope can't
 touch memory or the bus even if its `allowed_tools` say `Memory`/`Channel`. Add
-scopes deliberately, narrowest first.
+scopes deliberately, narrowest first. *(Post-v0.23.0, loomcycle surfaces each
+missing gate as a boot `WARNING:` — e.g. "allowed_tools includes Memory but
+memory_scopes is empty — every Memory op will default-deny" — so a forgotten
+scope is visible at startup rather than looking like the agent "chose" not to use
+the tool; F21.)*
 
 **Sharp edges:** loomcycle's docs are explicit — Bash is *not* a sandbox; if you
 need shell-like behavior for untrusted prompts, you want code-js or a separate
@@ -169,6 +186,7 @@ LOOMCYCLE_HTTP_PRIVATE_HOST_ALLOWLIST=app.internal   # if it resolves to a priva
 
 # Ops:
 LOOMCYCLE_METRICS_ENABLED=1
+LOOMCYCLE_METRICS_COLLECT_SYSTEM=1             # also sample host CPU/mem (Linux /proc) — catches co-tenant pressure (F19)
 LOOMCYCLE_OTEL_EXPORTER_OTLP_ENDPOINT=http://otel-collector:4318
 ```
 
