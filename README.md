@@ -151,6 +151,7 @@ claude plugin validate ./claude-code-plugin-loomcycle   # validate before publis
 
 | This plugin | loomcycle | Claude Code |
 |---|---|---|
+| 0.23.2 | Same runtime requirement as 0.21.0 (`loomcycle mcp --upstream` thin client; an instance running at `base_url`). This release is **docs-only** — the `loomcycle-configure` skill is reconciled against loomcycle **`main` (post-v0.23.0)**: inbound webhooks, third-party MCP, the two-layer tool gate, and the `.env.local`/`.env.insecure` split. Features that postdate the **v0.23.0** binary are flagged inline with their v0.23.0 fallback, so the docs are correct whether the operator runs v0.23.0 or `main`. | ≥ 2.1 |
 | 0.21.0 | **Requires a loomcycle build with `loomcycle mcp --upstream`** (RFC R thin client). The plugin no longer boots a runtime — a loomcycle instance must be running at `base_url`. On a build without `--upstream`, the flag is unknown and the server errors at launch — pin 0.20.x or upgrade loomcycle. | ≥ 2.1 |
 | 0.20.2 | as 0.20.1, **plus** the `loomcycle mcp --no-http` flag (verified on v0.22.0). On an older build that doesn't recognise `--no-http`, the server errors at launch — pin 0.20.1 or upgrade loomcycle. | ≥ 2.1 |
 | 0.20.1 | ≥ v0.12.x (`loomcycle mcp` + meta-tools); memory `add`/`recall` need ≥ v0.16; `operator-token` needs ≥ v0.17 | ≥ 2.1 |

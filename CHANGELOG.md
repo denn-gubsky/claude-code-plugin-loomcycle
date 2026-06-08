@@ -4,40 +4,73 @@ All notable changes to this project are documented here. The format follows
 [Keep a Changelog](https://keepachangelog.com/) and the project adheres to
 [Semantic Versioning](https://semver.org/).
 
-## [Unreleased]
+## [0.23.2] — 2026-06-08
 
-**`loomcycle-configure` skill — inbound webhooks, third-party MCP servers, and
-the second tool-gating layer.** Docs-only; grounded in loomcycle **v0.23.1**
-source + a hands-on Gitea-webhook integration run.
+**`loomcycle-configure` skill — inbound webhooks, third-party MCP servers, the
+two-layer tool gate, and a reconciliation pass against loomcycle `main`.**
+Docs-only; grounded in loomcycle **`main` (post-v0.23.0)** source + a hands-on
+Gitea-webhook integration run. *(There is **no `v0.23.1` tag** — the
+trigger/auth/env fixes below landed on `main` after the v0.23.0 tag and ship in
+the next loomcycle release; the **v0.23.0 brew binary does not have them**. Each
+is flagged inline so an operator knows which build they need.)*
+
+Version-vector jump **0.21.0 → 0.23.2**, tracking loomcycle's 0.23 line. Also
+**re-syncs `marketplace.json` (0.20.3 → 0.23.2)** with `plugin.json` — the two had
+drifted since 0.21.0 (the marketplace manifest's version wasn't bumped then).
 
 ### Added
-- **`skills/loomcycle-configure/reference/webhooks.md`** — new reference for the
-  `webhooks:` block (enable → `POST /v1/_webhooks/{name}`; the
-  `enabled: true` + `delivery:` requirement; the **v0.23.1** three-rule
-  secret-resolution model — `LOOMCYCLE_*` verify auto-allow, static-yaml
-  auto-trust, explicit `LOOMCYCLE_WEBHOOKS_ENV_ALLOWLIST` / scheduler twin — and
-  the new `auth.kind: none` trusted-network ingress; `payload_mapping.goal`
-  incl. `goal: "$"` to deliver the whole signed body; `recent-deliveries`/`test`
-  triage; `tenant_id` trust boundary; tailnet ingress with no relay) **and** the
+- **`skills/loomcycle-configure/reference/webhooks.md`** — reference for the
+  `webhooks:` block (enable → `POST /v1/_webhooks/{name}`; the `enabled: true` +
+  `delivery:` requirement + **post-v0.23.0 static-webhook boot-validation**, F24;
+  the three-rule secret-resolution model — `LOOMCYCLE_*` verify auto-allow,
+  static-yaml auto-trust, explicit `LOOMCYCLE_WEBHOOKS_ENV_ALLOWLIST` / scheduler
+  twin, F23; `auth.kind: none` trusted-network ingress; `payload_mapping.goal`
+  with the **post-v0.23.0 raw-body default**, F28 — no `goal` mapping now hands
+  the agent the whole signed event instead of an empty prompt; `recent-deliveries`
+  /`test` triage; `tenant_id` trust boundary; tailnet ingress) **and** the
   `mcp_servers:` block (stdio/http, `mcp__<server>__<tool>`, per-run
-  `${run.credentials.*}` headers).
+  `${run.credentials.*}` headers, the `${}` interpolation allowlist).
 
 ### Changed
-- **The `${}` YAML-interpolation allowlist is now documented** (routing.md +
-  webhooks.md): only `LOOMCYCLE_`-prefixed names plus the hardcoded
-  `BRAVE_API_KEY`/`GITHUB_TOKEN`/`SLACK_BOT_TOKEN`/`PG_DSN`/`REDIS_URL` expand;
-  provider keys are deliberately **not** interpolable. Maps the common
-  `FOO: "${LOOMCYCLE_FOO}"` workaround for non-prefixed MCP secrets.
-- **The two-layer default-deny is now explicit** (SKILL.md safety rule #3 +
-  profiles.md §3): capability tools (`Memory`/`Channel`/`AgentDef`/…) need an
-  agent-level scope list (`memory_scopes`/`channels`/`agent_def_scopes`) **on top
-  of** `allowed_tools` and the operator tool-enable.
-- **env-vars.md** — the webhook secret-gate vars documented for **v0.23.1**:
-  `LOOMCYCLE_SCHEDULER_ENV_ALLOWLIST` (shared trigger gate) plus the new
-  `LOOMCYCLE_WEBHOOKS_ENV_ALLOWLIST` twin and `LOOMCYCLE_WEBHOOKS_ALLOW_UNAUTHENTICATED`;
-  added `LOOMCYCLE_CHANNELS_LONGPOLL_CAP_MS` and a `memory_scopes` default-deny note.
-- **SKILL.md** — frontmatter description now covers webhooks + third-party MCP so
-  the skill auto-loads for those tasks.
+- **Version grounding corrected.** A prior draft labeled the F23 fix "v0.23.1";
+  no such tag exists. All trigger/auth/env fixes are relabeled **"post-v0.23.0
+  `main`"** across webhooks.md / env-vars.md / SKILL.md / profiles.md / routing.md,
+  with the v0.23.0-brew fallback kept explicit.
+- **`.env.local` / `.env.insecure` split documented** (loomcycle #399): secrets
+  in `.env.local`, non-secret operational config (incl. trigger-credential
+  allowlist *names*) in `.env.insecure`, sourced insecure-first. SKILL.md safety
+  rule #1 now permits reading/editing `.env.insecure` while keeping `.env.local`
+  off-limits; env-vars.md intro carries the file-split table + `LOOMCYCLE_ENV_FILE`;
+  profiles.md routes each var to its file.
+- **The two-layer default-deny + post-v0.23.0 boot warnings** (SKILL.md rule #3,
+  profiles.md §3): capability tools (`Memory`/`Channel`/`Evaluation`/
+  `Interruption`/`AgentDef`/…) need an agent-level scope gate on top of
+  `allowed_tools`; loomcycle now emits a boot `WARNING:` when a gate is missing
+  (F21).
+- **env-vars.md** — webhook secret-gate vars (`LOOMCYCLE_SCHEDULER_ENV_ALLOWLIST`
+  + the `LOOMCYCLE_WEBHOOKS_ENV_ALLOWLIST` twin + `LOOMCYCLE_WEBHOOKS_ALLOW_UNAUTHENTICATED`);
+  the `LOOMCYCLE_CHANNELS_LONGPOLL_CAP_MS` row gains the post-v0.23.0 `wait_ms`
+  truncation warning + `max_iterations` interaction (F22); the metrics row notes
+  `_COLLECT_SYSTEM` for host/co-tenant pressure (F19); the anthropic-oauth-dev
+  note gains `anthropic status --probe` (F6) + the cross-process refresh lock (F7).
+- **profiles.md** — file-tool relative-paths-resolve-against-process-CWD caveat
+  (launch loomcycle from the jail root; F13) and the metrics `_COLLECT_SYSTEM` knob.
+- **The `${}` YAML-interpolation allowlist** (routing.md + webhooks.md): only
+  `LOOMCYCLE_`-prefixed names plus the hardcoded `BRAVE_API_KEY`/`GITHUB_TOKEN`/
+  `SLACK_BOT_TOKEN`/`PG_DSN`/`REDIS_URL` expand; provider keys are deliberately
+  **not** interpolable. Maps the common `FOO: "${LOOMCYCLE_FOO}"` workaround.
+- **SKILL.md** — frontmatter description covers webhooks + third-party MCP so the
+  skill auto-loads for those tasks.
+- **README** — note that a `settings.json` env change (e.g. a new `LOOMCYCLE_*`
+  for the MCP server) needs a **full Claude Code restart**, not `/reload-plugins`
+  (F12).
+
+### Notes
+- loomcycle's MCP meta-tool surface grew on `main`: a new **`channeldef`** tool
+  (channel CRUD over MCP — F20) and a fuller **`register_agent`** schema carrying
+  `channels` / `evaluation_scopes` / `interruption` / `max_iterations` gates
+  (F14). No plugin command wraps these yet — flagged for a later command/surface
+  pass, not part of this docs round.
 
 ## [0.21.0] — 2026-06-06
 

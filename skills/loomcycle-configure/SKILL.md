@@ -21,9 +21,14 @@ The six deployment profiles the operator may ask about are points on a
 
 ## Hard safety rules (non-negotiable)
 
-1. **Never read or write `.env` / `.env.local` / `.env.example`.** They are
-   secret-bearing and gitignored. To set a variable, **print the exact line for
-   the operator to add themselves**. You may read/write `loomcycle.yaml`.
+1. **Never read or write the secret env file `.env.local`** (`*_API_KEY`,
+   `LOOMCYCLE_AUTH_TOKEN`, the operator-token pepper, trigger-secret *values*).
+   It is git-ignored. To set a secret, **print the exact line for the operator to
+   add themselves**. Its non-secret companion **`.env.insecure`** (post-v0.23.0
+   split — listen addr, sandbox roots, feature flags, allowlist *names*) carries
+   no credentials and *is* safe to read and edit; only `.env.local` is off-limits.
+   You may also read/write `loomcycle.yaml`. *(On a v0.23.0 binary there is only
+   `.env.local` — treat it as secret-bearing.)*
 2. **Never put a secret value in `loomcycle.yaml` or any file.** API keys and
    `LOOMCYCLE_AUTH_TOKEN` are referenced by **env-var name** only. The yaml
    never holds a key.
@@ -35,7 +40,11 @@ The six deployment profiles the operator may ask about are points on a
    `agent_def_scopes`, …) — having the tool in `allowed_tools` is necessary but
    **not sufficient**. An agent sees `operator-enabled ∩ allowed_tools ∩
    per-tool-scope`. Recommend the *narrowest* setting that works at every layer;
-   never widen "to make it work."
+   never widen "to make it work." *(Post-v0.23.0, loomcycle emits a boot
+   `WARNING:` when a tool is in `allowed_tools` but its gate is unset — `Memory`
+   w/o `memory_scopes`, `Channel` w/o `channels`, `Evaluation` w/o
+   `evaluation_scopes`, `Interruption` w/o `interruption.enabled` — so this
+   silent default-deny is now visible at startup; F21.)*
 4. **Bash is not a sandbox.** It is cwd-restricted + env-scrubbed only. If Bash
    is exposed to untrusted prompts, the runtime **must** be containerized — say
    so explicitly.
@@ -89,11 +98,13 @@ lists the exact env set, the yaml shape, and the sharp edges.
   memory, scheduler/webhooks/A2A, code-js, multi-tenant, observability,
   cluster). Look up any `LOOMCYCLE_*` here before recommending it.
 - **[reference/webhooks.md](reference/webhooks.md)** — inbound webhooks
-  (`webhooks:` block — enable, the `enabled`+`delivery` requirement, the HMAC
-  secret gate `LOOMCYCLE_SCHEDULER_ENV_ALLOWLIST`, `payload_mapping.goal`,
-  triage endpoints, tailnet ingress) **and** third-party MCP servers
-  (`mcp_servers:` — stdio/http, `mcp__server__tool`, the `${}` interpolation
-  allowlist). Read this for any external-integration wiring.
+  (`webhooks:` block — enable, the `enabled`+`delivery` requirement + post-v0.23.0
+  boot-validation, the webhook secret-resolution rules (`LOOMCYCLE_*` auto-allow /
+  static-yaml auto-trust / `LOOMCYCLE_WEBHOOKS_ENV_ALLOWLIST`), `auth.kind: none`
+  trusted-network ingress, `payload_mapping.goal` (raw-body default), triage
+  endpoints, tailnet ingress) **and** third-party MCP servers (`mcp_servers:` —
+  stdio/http, `mcp__server__tool`, the `${}` interpolation allowlist). Read this
+  for any external-integration wiring.
 
 ## Validation cheatsheet
 

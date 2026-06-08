@@ -8,8 +8,9 @@ secrets through **two different mechanisms** (webhook secret-resolution rules
 vs. the `${}` interpolation allowlist), which is the #1 thing operators conflate.
 Authoritative source: loomcycle `Context.help input-webhooks` +
 `docs/CONFIGURATION.md` + `internal/api/webhook/allowlist.go` +
-`internal/config/config.go` (verified against the **v0.23.1** F23 fix). Field
-names below match the config loader.
+`internal/config/config.go` (verified against loomcycle **`main`, post-v0.23.0**
+— the F23/F24/F28 trigger fixes; **none are in the v0.23.0 brew binary** — see the
+version notes below). Field names below match the config loader.
 
 ---
 
@@ -50,18 +51,28 @@ webhooks:
     rate_limit: { requests_per_minute: 60, burst: 10 }
 ```
 
-A def that is missing `enabled: true` or a valid `delivery:` is **silently
-inactive** → the URL returns an opaque `404 unknown_webhook` (no enumeration
-oracle). Static yaml defs are read directly; they do **not** bootstrap rows into
-the `webhook_defs` DB table, so don't go looking for them there.
+A def that is missing `enabled: true` is **silently inactive** → the URL returns
+an opaque `404 unknown_webhook` (no enumeration oracle). Static yaml defs are read
+directly; they do **not** bootstrap rows into the `webhook_defs` DB table, so
+don't go looking for them there.
+
+> **Boot-time validation (post-v0.23.0, F24).** A static `webhooks:` entry whose
+> delivery target can *never* fire is now a **hard `loomcycle validate` / startup
+> error** (not a silent request-time failure): `delivery: spawn` requires `agent`
+> and forbids `channel`; `delivery: channel` requires `channel` and forbids
+> `agent`; an unknown `delivery` or `auth.kind` is rejected. Secret
+> *resolvability* stays a **non-fatal boot `WARNING:`** (one line per static
+> webhook whose secret won't resolve). On the **v0.23.0 brew binary** these
+> mistakes surface only at request time (404/500). *(A missing `enabled: true` is
+> still just inactive, not an error.)*
 
 ### The signing secret — how a name is authorized (the #1 setup snag)
 
 `signing_secret_env` (hmac) / `bearer_token_env` (bearer) name an env var the
 receiver resolves **at verify time** — but only if that name is *authorized*.
-As of **loomcycle v0.23.1** the receiver authorizes a name when **any one** of
-three rules holds (verified against `internal/api/webhook/allowlist.go` +
-`config.go`):
+On loomcycle **`main` (post-v0.23.0; NOT in the v0.23.0 brew binary)** the
+receiver authorizes a name when **any one** of three rules holds (verified
+against `internal/api/webhook/allowlist.go` + `config.go`):
 
 1. **`LOOMCYCLE_*`-prefixed** (or a known third-party name — `GITHUB_TOKEN` etc.)
    — auto-allowed **for the verification secret only** (`signing_secret_env` /
@@ -96,13 +107,15 @@ Sharp edges that remain:
   yaml-interpolation allowlist (below), but both honor the `LOOMCYCLE_*`
   namespace, so a `LOOMCYCLE_`-named secret sails through both.
 
-> **Version note.** The three-rule model + the boot warnings are **v0.23.1**.
-> On **v0.23.0 and earlier** the receiver read *only*
-> `LOOMCYCLE_SCHEDULER_ENV_ALLOWLIST`, static secrets were **not** auto-trusted,
-> and a bare `env_allowlist=0 names` was the only clue — the original F23 trap.
-> If an operator is on v0.23.0, fall back to listing the secret there.
+> **Version note.** The three-rule model + the boot warnings landed on loomcycle
+> `main` **after** the v0.23.0 tag (F23, PR #385) — there is **no `v0.23.1` tag;
+> they ship in the next release**. The **v0.23.0 brew binary does NOT have them**:
+> it reads *only* `LOOMCYCLE_SCHEDULER_ENV_ALLOWLIST`, does **not** auto-trust
+> static secrets, and a bare `env_allowlist=0 names` is the only clue — the
+> original F23 trap. On a v0.23.0 binary, fall back to listing the secret in
+> `LOOMCYCLE_SCHEDULER_ENV_ALLOWLIST`.
 
-### Trusted-network ingress — `auth.kind: none` (v0.23.1)
+### Trusted-network ingress — `auth.kind: none` (post-v0.23.0)
 
 When the receiver is reachable **only** over an already-authenticated transport
 (a WireGuard/tailnet hop, an mTLS mesh) HMAC is redundant. Set `auth.kind: none`
@@ -127,20 +140,31 @@ LOOMCYCLE_WEBHOOKS_ALLOW_UNAUTHENTICATED=1
 Only do this when the listen surface is genuinely private (e.g. bound to a
 tailnet IP behind WireGuard). For a publicly-reachable receiver, keep HMAC.
 
-### Payload delivery — the spawned agent's prompt is the mapped `goal`
+### Payload delivery — the spawned agent's prompt is the `goal`
 
 The receiver projects the verified body through `payload_mapping` (a strict
 JSONPath subset: `$.a.b`, `$.a[0]` — no wildcards/filters/recursion) and the
-spawned run's **prompt is the mapped `goal`**, fenced in `<untrusted>` tags
-(a webhook body is attacker-influenceable, external input).
+spawned run's **prompt is the `goal`**, fenced in `<untrusted>` tags (a webhook
+body is attacker-influenceable, external input).
 
-**With no `payload_mapping`, `goal` is empty and the agent receives nothing.**
-This is silent — the run spawns but has no task. To hand the agent the whole
-signed event to parse, map the root:
+**The `goal` default changed post-v0.23.0 (F28).** What the agent receives:
+
+- **No `goal` key in `payload_mapping`** (or no `payload_mapping` at all) ⇒ the
+  agent receives the **entire raw signed body** as its task. On the **v0.23.0
+  brew binary** this case delivered an *empty* prompt and the run silently
+  no-op'd — the classic "webhook fired but the agent did nothing" trap.
+  Post-v0.23.0 the whole event is handed over, matching the GitHub-pattern
+  expectation that "the agent receives the event."
+- **A `goal` key IS mapped** ⇒ that projected value is used **verbatim**, even if
+  it resolves empty (the operator's explicit choice of which field is the task is
+  respected).
+
+So mapping the root is now optional, but still the clearest way to be explicit
+(and the only portable choice if you must also support a v0.23.0 binary):
 
 ```yaml
     payload_mapping:
-      goal: "$"                    # "$" root ⇒ the entire signed body as JSON
+      goal: "$"                    # "$" root ⇒ the entire signed body as JSON (explicit)
 ```
 
 Other mappable targets: `user_id`, `user_tier`, `run_metadata.*`, and
@@ -279,9 +303,10 @@ yaml-load (the `.` can't match the `${}` name regex, so they survive verbatim)
 
 | Symptom | Cause | Fix |
 |---|---|---|
-| webhook URL → `404 unknown_webhook` | def missing `enabled: true` or `delivery:` | add both to the `webhooks:` entry |
-| webhook → `503 secret_unresolvable` (v0.23.1: see the boot `WARNING:` line) | secret name authorized by none of the 3 rules | name it `LOOMCYCLE_*`, declare it in a static yaml def, or add it to `LOOMCYCLE_WEBHOOKS_ENV_ALLOWLIST` |
+| webhook URL → `404 unknown_webhook` | def missing `enabled: true` (inactive) | add `enabled: true` to the `webhooks:` entry |
+| `loomcycle validate` / startup **fails** on a `webhooks:` entry | post-v0.23.0 (F24) delivery-target mismatch: `spawn` w/o `agent`, `channel` w/o `channel`, or unknown `delivery`/`auth.kind` | fix the entry per the boot error |
+| webhook → `503 secret_unresolvable` (post-v0.23.0: see the boot `WARNING:` line) | secret name authorized by none of the 3 rules | name it `LOOMCYCLE_*`, declare it in a static yaml def, or add it to `LOOMCYCLE_WEBHOOKS_ENV_ALLOWLIST` |
 | webhook → `503 unauthenticated_mode_disabled` | `auth.kind: none` without the opt-in | set `LOOMCYCLE_WEBHOOKS_ALLOW_UNAUTHENTICATED=1` (only on a private listen surface) |
-| spawned agent gets an **empty** task | no `payload_mapping.goal` | add `payload_mapping: { goal: "$" }` (or a specific path) |
+| spawned agent gets an **empty** task | **v0.23.0 binary** with no `payload_mapping.goal` (post-v0.23.0 F28 defaults to the raw body) | upgrade, or add `payload_mapping: { goal: "$" }` |
 | MCP server `401`s; header shows literal `${FOO}` | non-allowlisted `${}` name | rename secret to `LOOMCYCLE_*` and map it: `FOO: "${LOOMCYCLE_FOO}"` |
 | external sender can't reach the receiver | `LISTEN_ADDR=127.0.0.1` | bind a reachable IP (tailnet IP for a tailnet sender; no relay needed) |
