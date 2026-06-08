@@ -1,6 +1,6 @@
 ---
 name: loomcycle-configure
-description: Configure a loomcycle runtime — providers, model tiers, user tiers, fallbacks, environment variables, and deployment profiles (brew/in-system, containerized, true sandbox, server, multi-tenant, cloud). Use when the user wants to set up or tune loomcycle.yaml or its env, pick a deployment posture, wire provider routing/cost-cascades, gate plans, or lock down tool/sandbox/auth.
+description: Configure a loomcycle runtime — providers, model tiers, user tiers, fallbacks, environment variables, deployment profiles (brew/in-system, containerized, true sandbox, server, multi-tenant, cloud), inbound webhooks, and third-party MCP servers. Use when the user wants to set up or tune loomcycle.yaml or its env, pick a deployment posture, wire provider routing/cost-cascades, gate plans, lock down tool/sandbox/auth, receive webhooks, or connect external MCP tools.
 allowed-tools: Read Write Edit Bash(loomcycle validate*) Bash(loomcycle doctor*) Bash(loomcycle init*)
 ---
 
@@ -27,9 +27,15 @@ The six deployment profiles the operator may ask about are points on a
 2. **Never put a secret value in `loomcycle.yaml` or any file.** API keys and
    `LOOMCYCLE_AUTH_TOKEN` are referenced by **env-var name** only. The yaml
    never holds a key.
-3. **Tools are default-deny.** `Read`/`Write`/`Edit`/`Bash`/`HTTP`/`WebFetch`
-   refuse every call until their root/allowlist env var is set. Recommend the
-   *narrowest* setting that works; never widen "to make it work."
+3. **Tools are default-deny — in *two* layers.** (a) The built-ins
+   `Read`/`Write`/`Edit`/`Bash`/`HTTP`/`WebFetch` refuse every call until their
+   *operator* root/allowlist env var is set. (b) The capability tools
+   `Memory`/`Channel`/`AgentDef`/`ScheduleDef`/… additionally refuse until the
+   *agent* carries an explicit scope list (`memory_scopes`, `channels:`,
+   `agent_def_scopes`, …) — having the tool in `allowed_tools` is necessary but
+   **not sufficient**. An agent sees `operator-enabled ∩ allowed_tools ∩
+   per-tool-scope`. Recommend the *narrowest* setting that works at every layer;
+   never widen "to make it work."
 4. **Bash is not a sandbox.** It is cwd-restricted + env-scrubbed only. If Bash
    is exposed to untrusted prompts, the runtime **must** be containerized — say
    so explicitly.
@@ -82,6 +88,12 @@ lists the exact env set, the yaml shape, and the sharp edges.
   variable catalogue (identity/listen, storage, tool sandboxes, providers,
   memory, scheduler/webhooks/A2A, code-js, multi-tenant, observability,
   cluster). Look up any `LOOMCYCLE_*` here before recommending it.
+- **[reference/webhooks.md](reference/webhooks.md)** — inbound webhooks
+  (`webhooks:` block — enable, the `enabled`+`delivery` requirement, the HMAC
+  secret gate `LOOMCYCLE_SCHEDULER_ENV_ALLOWLIST`, `payload_mapping.goal`,
+  triage endpoints, tailnet ingress) **and** third-party MCP servers
+  (`mcp_servers:` — stdio/http, `mcp__server__tool`, the `${}` interpolation
+  allowlist). Read this for any external-integration wiring.
 
 ## Validation cheatsheet
 
