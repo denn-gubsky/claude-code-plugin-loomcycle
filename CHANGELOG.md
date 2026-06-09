@@ -4,6 +4,67 @@ All notable changes to this project are documented here. The format follows
 [Keep a Changelog](https://keepachangelog.com/) and the project adheres to
 [Semantic Versioning](https://semver.org/).
 
+## [0.23.5] — 2026-06-09
+
+**Re-verification + version-grounding pass against loomcycle's real release
+tags, plus the v0.23.3–v0.23.5 findings.** Docs-only; every claim below was
+confirmed by direct read of loomcycle source at the **v0.23.5 tag** (not the
+experiment-era catalog, which still marks several of these "open"). The headline
+correction: loomcycle shipped **v0.23.0 → v0.23.3 → v0.23.4 → v0.23.5 with no
+`v0.23.1`/`v0.23.2` tag**, so the prior docs' "post-v0.23.0 `main`, ships next
+release" hedging is replaced everywhere with the concrete tag + PR number.
+
+Version-vector jump **0.23.2 → 0.23.5**, tracking loomcycle's latest tag.
+
+### Added
+- **Robust `anthropic-oauth-dev` setup walkthrough** (`routing.md`) — the
+  experiment-validated technique end-to-end: enable
+  (`LOOMCYCLE_ANTHROPIC_OAUTH_DEV_ENABLED=1`) → `loomcycle anthropic login`
+  (token at `~/.config/loomcycle/anthropic-oauth.json`, `0600`, outside repo+DB)
+  → route it **last** in `provider_priority` + pin per-agent → verify health with
+  `loomcycle anthropic status --probe`. Documents the two **v0.23.3** robustness
+  fixes: **F6/#392** (`--probe`/`--verify` does a free server-side refresh that
+  rotates+heals; plain `status` is local-metadata-only and can read "valid" on a
+  revoked token) and **F7/#391** (cross-process `flock` + reload-before-refresh,
+  so concurrent loomcycle processes no longer corrupt the shared token →
+  `invalid_grant` forced re-login). Both verified in
+  `internal/providers/anthropic_oauth_dev/{refresh,lock_unix}.go` +
+  `internal/cli/anthropic.go`.
+- **`LOOMCYCLE_MCP_ALLOW_DYNAMIC_STDIO` row** (`env-vars.md`) — **v0.23.3, F31/#405**:
+  runtime-authored (`mcpserverdef`) MCP servers may use `transport: stdio` only
+  behind this default-OFF flag (it runs an arbitrary local command); http /
+  static-yaml-stdio unaffected.
+- **F30 note** (`webhooks.md`) — **v0.23.3/#403**: a `delivery: spawn` webhook can
+  now resolve a **runtime-authored (AgentDef-substrate) agent**, not just a static
+  yaml `agents:` entry (webhookdef stamps `tenant_id` from the run identity). Fixes
+  the old `rejected_spawn_setup: unknown agent` on fully-dynamic loops. + gotcha row.
+- **F33 note** (`webhooks.md`) — **v0.23.5/#409**: a single-tool "notifier" agent
+  whose `allowed_tools` is only `mcp__server__*` now actually fires — dynamic-MCP
+  tools are **advertised at run start**, so the model emits a real `tool_call`
+  instead of inert `<function_calls>` text (the silent no-op). + gotcha row +
+  the v0.23.3/v0.23.4 "add one native tool (`Context`)" workaround.
+- **F32 secrets-at-rest security rule** (`SKILL.md` rule #5) — **v0.23.4**:
+  loomcycle persists agent tool I/O; v0.23.4 masks secret-shaped values to
+  `[redacted:<ENV_NAME>]` before persisting (value-based; keeps the env-var name).
+  Still advise out-of-band secret passing; redaction is an at-rest guard only (a
+  `Bash` child still inherits the live `LOOMCYCLE_*` env).
+
+### Changed
+- **Version grounding pinned to real tags** across `SKILL.md` / `routing.md` /
+  `env-vars.md` / `webhooks.md` / `README.md`: F23 (#385), F24, F28, F18 (#388),
+  F21 (#389), the `.env.local`/`.env.insecure` split (#399), F29 (#404), F30
+  (#403), F31 (#405) → **v0.23.3**; F32 → **v0.23.4**; F33 → **v0.23.5**. The
+  v0.23.0-brew fallback is kept explicit for each.
+- **`anthropic-oauth-dev` provider row** (`routing.md`) + the oauth-dev block
+  (`env-vars.md`) now cite v0.23.3/#391/#392 instead of "post-v0.23.0", and note
+  the token's location keeps it clear of the F32 at-rest path.
+- **F21 boot-warning re-verified as shipped** (was marked "open" in the
+  experiment catalog) — `internal/config/config.go` emits it into `cfg.Warnings` /
+  `loomcycle validate` as of v0.23.3/#389; `SKILL.md` rule #3 updated.
+- **`webhooks.md` MCP section** corrected: the stale "stdio cannot be registered
+  at runtime" line now reflects F31 (gated dynamic stdio).
+- **`plugin.json` + `marketplace.json`** bumped 0.23.2 → 0.23.5 (kept in sync).
+
 ## [0.23.2] — 2026-06-08
 
 **`loomcycle-configure` skill — inbound webhooks, third-party MCP servers, the
