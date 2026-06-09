@@ -24,8 +24,8 @@ The six deployment profiles the operator may ask about are points on a
 1. **Never read or write the secret env file `.env.local`** (`*_API_KEY`,
    `LOOMCYCLE_AUTH_TOKEN`, the operator-token pepper, trigger-secret *values*).
    It is git-ignored. To set a secret, **print the exact line for the operator to
-   add themselves**. Its non-secret companion **`.env.insecure`** (post-v0.23.0
-   split — listen addr, sandbox roots, feature flags, allowlist *names*) carries
+   add themselves**. Its non-secret companion **`.env.insecure`** (v0.23.3 split,
+   #399 — listen addr, sandbox roots, feature flags, allowlist *names*) carries
    no credentials and *is* safe to read and edit; only `.env.local` is off-limits.
    You may also read/write `loomcycle.yaml`. *(On a v0.23.0 binary there is only
    `.env.local` — treat it as secret-bearing.)*
@@ -40,15 +40,28 @@ The six deployment profiles the operator may ask about are points on a
    `agent_def_scopes`, …) — having the tool in `allowed_tools` is necessary but
    **not sufficient**. An agent sees `operator-enabled ∩ allowed_tools ∩
    per-tool-scope`. Recommend the *narrowest* setting that works at every layer;
-   never widen "to make it work." *(Post-v0.23.0, loomcycle emits a boot
+   never widen "to make it work." *(v0.23.3 (F21/#389), loomcycle emits a boot
    `WARNING:` when a tool is in `allowed_tools` but its gate is unset — `Memory`
    w/o `memory_scopes`, `Channel` w/o `channels`, `Evaluation` w/o
    `evaluation_scopes`, `Interruption` w/o `interruption.enabled` — so this
-   silent default-deny is now visible at startup; F21.)*
+   silent default-deny is now visible at startup, surfaced in `cfg.Warnings` /
+   `loomcycle validate`.)*
 4. **Bash is not a sandbox.** It is cwd-restricted + env-scrubbed only. If Bash
    is exposed to untrusted prompts, the runtime **must** be containerized — say
    so explicitly.
-5. **Validate before declaring done.** Run `loomcycle validate <yaml>` (and
+5. **Secrets at rest in the DB are redacted (v0.23.4, F32) — but keep them
+   off the cmdline anyway.** loomcycle persists agent tool I/O (the full `Bash`
+   input + result, etc.) in its store; before v0.23.4 a token an agent inlined
+   on a command line (`curl -H "Authorization: token <TOKEN>"`) was written to
+   the DB in **cleartext** — and a tracked DB checkpoint could carry it into git.
+   **v0.23.4 masks secret-shaped values to `[redacted:<ENV_NAME>]` before
+   persisting** (value-based match — it catches the secret even renamed or inlined
+   in a URL; the env-var *name* is kept for debuggability). Still advise agents to
+   pass secrets **out-of-band** (env / stdin / a credential-helper script), never
+   inline — so the secret never even transits a transcript. Redaction is an
+   **at-rest** guard only: a `Bash` child still inherits the live `LOOMCYCLE_*`
+   process env, so an agent *can* read a secret at runtime (ties back to rule #4).
+6. **Validate before declaring done.** Run `loomcycle validate <yaml>` (and
    `loomcycle doctor` if an instance is reachable). Report the real outcome.
 
 ## Workflow
@@ -98,7 +111,7 @@ lists the exact env set, the yaml shape, and the sharp edges.
   memory, scheduler/webhooks/A2A, code-js, multi-tenant, observability,
   cluster). Look up any `LOOMCYCLE_*` here before recommending it.
 - **[reference/webhooks.md](reference/webhooks.md)** — inbound webhooks
-  (`webhooks:` block — enable, the `enabled`+`delivery` requirement + post-v0.23.0
+  (`webhooks:` block — enable, the `enabled`+`delivery` requirement + v0.23.3
   boot-validation, the webhook secret-resolution rules (`LOOMCYCLE_*` auto-allow /
   static-yaml auto-trust / `LOOMCYCLE_WEBHOOKS_ENV_ALLOWLIST`), `auth.kind: none`
   trusted-network ingress, `payload_mapping.goal` (raw-body default), triage
