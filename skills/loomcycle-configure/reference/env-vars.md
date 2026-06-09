@@ -9,7 +9,7 @@ Secrets (`*_API_KEY`, `LOOMCYCLE_AUTH_TOKEN`, `LOOMCYCLE_OPERATOR_TOKEN_PEPPER`)
 are referenced by name only and live in the operator's secret store / keychain,
 never in a repo file.
 
-> **Two env files (post-v0.23.0 split — loomcycle #399, `docs/CONFIGURATION.md`
+> **Two env files (v0.23.3 split — loomcycle #399, `docs/CONFIGURATION.md`
 > §9c).** The launcher (`loomcycle.sh` / `loomcycle-mcp.sh`) sources
 > **`.env.insecure` first, then `.env.local`** (config first, secrets last):
 >
@@ -59,6 +59,7 @@ never in a repo file.
 | `LOOMCYCLE_HTTP_CALLER_AUTHORITATIVE` | `1` = caller's per-request `allowed_hosts` is the sole policy (operator list is a default). Unset = caller can only *narrow* the operator's static list. |
 | `BRAVE_API_KEY` | `WebSearch` tool (Brave Search; 2k/mo free tier). |
 | `LOOMCYCLE_MCP_ALLOW_PRIVILEGED_TOOLS` | `1` lets **dynamically-registered** agents request privileged builtins (`Bash`/`Write`/`Edit`); stripped silently otherwise. Only flip on when the MCP client is trusted (operator-launched stdio = trusted; remote HTTP MCP = NOT). |
+| `LOOMCYCLE_MCP_ALLOW_DYNAMIC_STDIO` | **(v0.23.3, F31/#405)** `1` lets a **runtime-authored** MCP server (`POST /v1/_mcpserverdef` / the `mcpserverdef` tool) use `transport: stdio` — which **runs an arbitrary local command**, so it is **off by default** and refused with an explicit error otherwise. `http`/`streamable-http` dynamic servers need no flag (mediated by the outbound host allowlist); **static `mcp_servers:` stdio in yaml is operator-trusted and unaffected**. Only set on a host where the MCP-authoring principal is trusted to name local commands. |
 
 ## Filesystem roots (discovery)
 
@@ -95,7 +96,7 @@ never in a repo file.
 
 | Var | Default | Purpose |
 |---|---|---|
-| `LOOMCYCLE_CHANNELS_LONGPOLL_CAP_MS` | 30000 | Server cap on a `Channel.subscribe` `wait_ms`. A `wait_ms` **larger than the cap is silently truncated** to it (post-v0.23.0 F22: logged once per channel as a boot/runtime `WARNING:`). The default 30 s forces a parked subscriber to re-subscribe every 30 s, and **each re-subscribe consumes one `max_iterations`** — so a too-low cap can exhaust a long-idle agent's iteration budget before any message arrives. Raise the cap (e.g. `180000`) and/or the agent's `max_iterations` for webhook/event-driven agents that block waiting for a signal. (Channel access itself is gated per-agent by the `channels:` publish/subscribe ACL — default-deny.) |
+| `LOOMCYCLE_CHANNELS_LONGPOLL_CAP_MS` | 30000 | Server cap on a `Channel.subscribe` `wait_ms`. A `wait_ms` **larger than the cap is silently truncated** to it (**v0.23.3**, F22/#390: logged once per channel as a runtime `WARNING:` on first truncation). The default 30 s forces a parked subscriber to re-subscribe every 30 s, and **each re-subscribe consumes one `max_iterations`** — so a too-low cap can exhaust a long-idle agent's iteration budget before any message arrives. Raise the cap (e.g. `180000`) and/or the agent's `max_iterations` for webhook/event-driven agents that block waiting for a signal. (Channel access itself is gated per-agent by the `channels:` publish/subscribe ACL — default-deny.) |
 
 ## Concurrency, fairness, provider timeouts
 
@@ -114,9 +115,9 @@ never in a repo file.
 |---|---|
 | `LOOMCYCLE_SCHEDULER_ENABLED` / `_TICK_SECONDS` / `_FIRE_TIMEOUT_SECONDS` | Scheduled runs (RFC E). |
 | `LOOMCYCLE_SCHEDULER_ENV_ALLOWLIST` | Comma-separated env-var NAMES the **scheduler** (and, merged, the webhook receiver + mem9 backend) may resolve as secrets/bearers. The shared trigger-credential gate. For webhooks, prefer the better-named twin below; this one still works (union). |
-| `LOOMCYCLE_WEBHOOKS_ENV_ALLOWLIST` | **(post-v0.23.0)** The webhook-specific, correctly-named twin — comma-separated secret/cred env NAMES, merged (union) with the scheduler list. **Often unnecessary:** a `LOOMCYCLE_*`-named *verification* secret is auto-allowed, and a *static* (yaml) webhook's own secret/cred names are auto-trusted. You only need this for a **non-`LOOMCYCLE_`-named** secret, or an **agent-reachable** `user_credentials_from_env` on a **runtime**-authored (`webhookdef`-tool) def. Full rules: [webhooks.md](webhooks.md). (v0.23.0 brew binary: only `LOOMCYCLE_SCHEDULER_ENV_ALLOWLIST` was read, with no auto-allow — the original F23 trap.) |
+| `LOOMCYCLE_WEBHOOKS_ENV_ALLOWLIST` | **(v0.23.3, F23/#385)** The webhook-specific, correctly-named twin — comma-separated secret/cred env NAMES, merged (union) with the scheduler list. **Often unnecessary:** a `LOOMCYCLE_*`-named *verification* secret is auto-allowed, and a *static* (yaml) webhook's own secret/cred names are auto-trusted. You only need this for a **non-`LOOMCYCLE_`-named** secret, or an **agent-reachable** `user_credentials_from_env` on a **runtime**-authored (`webhookdef`-tool) def. Full rules: [webhooks.md](webhooks.md). (v0.23.0 brew binary: only `LOOMCYCLE_SCHEDULER_ENV_ALLOWLIST` was read, with no auto-allow — the original F23 trap.) |
 | `LOOMCYCLE_WEBHOOKS_ENABLED` | Inbound webhooks (RFC H). `1` mounts `POST /v1/_webhooks/{name}`. Off by default. Full config in [webhooks.md](webhooks.md). |
-| `LOOMCYCLE_WEBHOOKS_ALLOW_UNAUTHENTICATED` | **(post-v0.23.0)** `1` opts into `auth.kind: none` ingress (skip HMAC for a receiver only reachable over an already-authenticated transport — WireGuard/tailnet, mTLS). Default OFF — a `none`-auth webhook `503`s `unauthenticated_mode_disabled`. Only set on a genuinely private listen surface. |
+| `LOOMCYCLE_WEBHOOKS_ALLOW_UNAUTHENTICATED` | **(v0.23.3, F23/#385)** `1` opts into `auth.kind: none` ingress (skip HMAC for a receiver only reachable over an already-authenticated transport — WireGuard/tailnet, mTLS). Default OFF — a `none`-auth webhook `503`s `unauthenticated_mode_disabled`. Only set on a genuinely private listen surface. |
 | `LOOMCYCLE_A2A_ENABLED` / `_SERVER_CARD` / `_PUBLIC_BASE_URL` / `_TENANCY_ROUTING` | Agent2Agent protocol (RFC G). `_TENANCY_ROUTING=host|path` for per-route tenancy. |
 
 ## Multi-tenant authorization (RFC L)
@@ -157,13 +158,18 @@ section for the token lifecycle + the legacy-token-disable gotcha.
 `LOOMCYCLE_ANTHROPIC_OAUTH_DEV_ENABLED=1` to expose the provider, then
 `loomcycle anthropic login`. `LOOMCYCLE_ANTHROPIC_OAUTH_CALLBACK_PORT` and
 `LOOMCYCLE_CLAUDE_CODE_VERSION` (User-Agent self-patch on drift) are the related
-knobs. Single-machine, single-operator, no SLA. Excluded from multi-tenant and
-multi-replica by design (tokens at `~/.config/loomcycle/anthropic-oauth.json`).
+knobs. Single-machine, single-operator, no SLA, ToS risk. Excluded from
+multi-tenant and multi-replica by design. The token lives at
+`~/.config/loomcycle/anthropic-oauth.json` (mode `0600`) — **outside the repo and
+the loomcycle DB**, so it never commits and never reaches the F32 at-rest
+transcript path. Full setup + routing walkthrough: [routing.md](routing.md).
 
 `loomcycle anthropic status` prints only **local token-file metadata** (it can
-read "valid" while Anthropic has already revoked the token). Post-v0.23.0, add
-**`--probe`** (alias `--verify`) to confirm server-side — it does a free token
-refresh and reports `✓ valid` (exit 0) / `✗ INVALID` (exit 1), persisting a fresh
-token on success (F6). Concurrent loomcycle processes now share the token file
-safely (a cross-process refresh lock + reload-before-refresh; F7) — so the
-oauth-dev provider no longer corrupts its token under parallel runs.
+read "valid" while Anthropic has already revoked the token). **v0.23.3** (F6/#392)
+adds **`--probe`** (alias `--verify`) to confirm server-side — it does a free
+token refresh and reports `✓ valid` (exit 0, rotating + persisting a fresh token
+on success) / `✗ INVALID` (exit 1). **v0.23.3** (F7/#391) also makes concurrent
+loomcycle processes share the token file safely — a cross-process `flock` +
+reload-before-refresh — so the oauth-dev provider no longer corrupts its token
+(`invalid_grant`, forced re-login) under parallel runs. On a **v0.23.0** binary
+neither exists: `status` is local-only and a single process must own the token.

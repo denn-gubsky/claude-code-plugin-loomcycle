@@ -8,9 +8,10 @@ secrets through **two different mechanisms** (webhook secret-resolution rules
 vs. the `${}` interpolation allowlist), which is the #1 thing operators conflate.
 Authoritative source: loomcycle `Context.help input-webhooks` +
 `docs/CONFIGURATION.md` + `internal/api/webhook/allowlist.go` +
-`internal/config/config.go` (verified against loomcycle **`main`, post-v0.23.0**
-— the F23/F24/F28 trigger fixes; **none are in the v0.23.0 brew binary** — see the
-version notes below). Field names below match the config loader.
+`internal/config/config.go` (verified against loomcycle **v0.23.3** — the
+F23/F24/F28 trigger fixes + the F29/F30 dynamic-substrate fixes; **none are in the
+v0.23.0 brew binary** — see the version notes below). Field names below match the
+config loader.
 
 ---
 
@@ -56,7 +57,7 @@ an opaque `404 unknown_webhook` (no enumeration oracle). Static yaml defs are re
 directly; they do **not** bootstrap rows into the `webhook_defs` DB table, so
 don't go looking for them there.
 
-> **Boot-time validation (post-v0.23.0, F24).** A static `webhooks:` entry whose
+> **Boot-time validation (v0.23.3, F24).** A static `webhooks:` entry whose
 > delivery target can *never* fire is now a **hard `loomcycle validate` / startup
 > error** (not a silent request-time failure): `delivery: spawn` requires `agent`
 > and forbids `channel`; `delivery: channel` requires `channel` and forbids
@@ -66,11 +67,21 @@ don't go looking for them there.
 > mistakes surface only at request time (404/500). *(A missing `enabled: true` is
 > still just inactive, not an error.)*
 
+> **The `agent:` target may be a runtime-authored (AgentDef-substrate) agent
+> (v0.23.3, F30/#403).** A `delivery: spawn` webhook can now resolve an agent
+> created at runtime via `POST /v1/_agentdef` / the `agentdef` tool, not just a
+> static `agents:` yaml entry. On v0.23.0–v0.23.2-era `main` a delivery to a
+> dynamic agent failed `rejected_spawn_setup: unknown agent` because the spawn
+> resolver consulted yaml only; v0.23.3 stamps the def's `tenant_id` from the run
+> identity so the spawn resolves it under the right tenant. So a fully-dynamic
+> "webhook → spawn a substrate agent" loop now works end-to-end. *(This pairs
+> with F33 below if that agent's only capability is a dynamic MCP tool.)*
+
 ### The signing secret — how a name is authorized (the #1 setup snag)
 
 `signing_secret_env` (hmac) / `bearer_token_env` (bearer) name an env var the
 receiver resolves **at verify time** — but only if that name is *authorized*.
-On loomcycle **`main` (post-v0.23.0; NOT in the v0.23.0 brew binary)** the
+On loomcycle **v0.23.3** (F23/#385; **NOT in the v0.23.0 brew binary**) the
 receiver authorizes a name when **any one** of three rules holds (verified
 against `internal/api/webhook/allowlist.go` + `config.go`):
 
@@ -107,15 +118,15 @@ Sharp edges that remain:
   yaml-interpolation allowlist (below), but both honor the `LOOMCYCLE_*`
   namespace, so a `LOOMCYCLE_`-named secret sails through both.
 
-> **Version note.** The three-rule model + the boot warnings landed on loomcycle
-> `main` **after** the v0.23.0 tag (F23, PR #385) — there is **no `v0.23.1` tag;
-> they ship in the next release**. The **v0.23.0 brew binary does NOT have them**:
+> **Version note.** The three-rule model + the boot warnings shipped in the
+> **v0.23.3** tag (F23, PR #385) — loomcycle went **v0.23.0 → v0.23.3 directly
+> (no `v0.23.1`/`v0.23.2` tag)**. The **v0.23.0 brew binary does NOT have them**:
 > it reads *only* `LOOMCYCLE_SCHEDULER_ENV_ALLOWLIST`, does **not** auto-trust
 > static secrets, and a bare `env_allowlist=0 names` is the only clue — the
 > original F23 trap. On a v0.23.0 binary, fall back to listing the secret in
 > `LOOMCYCLE_SCHEDULER_ENV_ALLOWLIST`.
 
-### Trusted-network ingress — `auth.kind: none` (post-v0.23.0)
+### Trusted-network ingress — `auth.kind: none` (v0.23.3)
 
 When the receiver is reachable **only** over an already-authenticated transport
 (a WireGuard/tailnet hop, an mTLS mesh) HMAC is redundant. Set `auth.kind: none`
@@ -147,7 +158,7 @@ JSONPath subset: `$.a.b`, `$.a[0]` — no wildcards/filters/recursion) and the
 spawned run's **prompt is the `goal`**, fenced in `<untrusted>` tags (a webhook
 body is attacker-influenceable, external input).
 
-**The `goal` default changed post-v0.23.0 (F28).** What the agent receives:
+**The `goal` default changed in v0.23.3 (F28).** What the agent receives:
 
 - **No `goal` key in `payload_mapping`** (or no `payload_mapping` at all) ⇒ the
   agent receives the **entire raw signed body** as its task. On the **v0.23.0
@@ -251,11 +262,28 @@ mcp_servers:
 - **Operator-level `allowed_tools`** on a server narrows which of its tools are
   registered **at all**, before any agent's own `allowed_tools` is consulted —
   two filters in series.
-- **stdio** servers are spawned at startup and yaml-only. **http** servers are
-  dialed per-call and may *also* be registered at runtime via the MCPServerDef
-  substrate (`POST /v1/_mcpserverdef`, no restart) — stdio cannot.
+- **http**/**streamable-http** servers are dialed per-call and may *also* be
+  registered at runtime via the MCPServerDef substrate
+  (`POST /v1/_mcpserverdef` / the `mcpserverdef` tool, no restart) — mediated by
+  the outbound host allowlist. **stdio** servers are spawned at startup; in yaml
+  they're operator-trusted and need no flag. Runtime-registering a **stdio**
+  server is **gated off by default** (`LOOMCYCLE_MCP_ALLOW_DYNAMIC_STDIO=1`, F31)
+  because it runs an arbitrary local command — **v0.23.3** lifted the old
+  "stdio can't be dynamic" hard rule, but kept it behind that flag.
 - The **server process holds the token** (in its own env); the agent's Bash
   never sees it.
+
+> **A dynamic-MCP-only agent now actually calls its tools (v0.23.5, F33/#409).**
+> An agent whose `allowed_tools` is **only** a runtime-MCP wildcard (e.g.
+> `["mcp__telegram-dyn__*"]`, no native tool) — the natural "single-purpose
+> notifier" shape — used to **silently no-op**: dynamic MCP tools were a
+> first-call *fallback* and were never **advertised** to the model, so with zero
+> advertised tools the model emitted the call as inert `<function_calls>` **text**
+> and the run reported a plausible "✅ done" having sent nothing. **v0.23.5 loads
+> + advertises dynamic MCP tools at run START**, so the model emits a real
+> `tool_call` the first time with no native-tool crutch. *On v0.23.3/v0.23.4*, the
+> workaround is to also give such an agent **one native tool** (e.g. `Context`),
+> which puts it in tool-calling mode so the lazy MCP call then dispatches.
 
 ### Secret injection — gate #2: the `${}` interpolation allowlist
 
@@ -304,9 +332,11 @@ yaml-load (the `.` can't match the `${}` name regex, so they survive verbatim)
 | Symptom | Cause | Fix |
 |---|---|---|
 | webhook URL → `404 unknown_webhook` | def missing `enabled: true` (inactive) | add `enabled: true` to the `webhooks:` entry |
-| `loomcycle validate` / startup **fails** on a `webhooks:` entry | post-v0.23.0 (F24) delivery-target mismatch: `spawn` w/o `agent`, `channel` w/o `channel`, or unknown `delivery`/`auth.kind` | fix the entry per the boot error |
-| webhook → `503 secret_unresolvable` (post-v0.23.0: see the boot `WARNING:` line) | secret name authorized by none of the 3 rules | name it `LOOMCYCLE_*`, declare it in a static yaml def, or add it to `LOOMCYCLE_WEBHOOKS_ENV_ALLOWLIST` |
+| `loomcycle validate` / startup **fails** on a `webhooks:` entry | v0.23.3 (F24) delivery-target mismatch: `spawn` w/o `agent`, `channel` w/o `channel`, or unknown `delivery`/`auth.kind` | fix the entry per the boot error |
+| webhook → `503 secret_unresolvable` (v0.23.3: see the boot `WARNING:` line) | secret name authorized by none of the 3 rules | name it `LOOMCYCLE_*`, declare it in a static yaml def, or add it to `LOOMCYCLE_WEBHOOKS_ENV_ALLOWLIST` |
 | webhook → `503 unauthenticated_mode_disabled` | `auth.kind: none` without the opt-in | set `LOOMCYCLE_WEBHOOKS_ALLOW_UNAUTHENTICATED=1` (only on a private listen surface) |
-| spawned agent gets an **empty** task | **v0.23.0 binary** with no `payload_mapping.goal` (post-v0.23.0 F28 defaults to the raw body) | upgrade, or add `payload_mapping: { goal: "$" }` |
+| spawned agent gets an **empty** task | **v0.23.0 binary** with no `payload_mapping.goal` (v0.23.3 F28 defaults to the raw body) | upgrade, or add `payload_mapping: { goal: "$" }` |
 | MCP server `401`s; header shows literal `${FOO}` | non-allowlisted `${}` name | rename secret to `LOOMCYCLE_*` and map it: `FOO: "${LOOMCYCLE_FOO}"` |
+| webhook → `rejected_spawn_setup: unknown agent` (target is an AgentDef/runtime agent) | pre-v0.23.3 webhook-spawn resolver read yaml agents only (F30) | upgrade to **v0.23.3+**, or declare the target as a static `agents:` yaml entry |
+| "notifier" agent reports success but **nothing is sent**; its `allowed_tools` is only `mcp__server__*` | pre-v0.23.5 didn't advertise dynamic-MCP tools, so the call was emitted as text, never dispatched (F33) | upgrade to **v0.23.5+**, or give the agent one native tool (e.g. `Context`) to enter tool-calling mode |
 | external sender can't reach the receiver | `LISTEN_ADDR=127.0.0.1` | bind a reachable IP (tailnet IP for a tailnet sender; no relay needed) |

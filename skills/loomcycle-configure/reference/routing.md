@@ -14,7 +14,7 @@ loomcycle's config loader — do not invent fields.
 | `gemini` | `GEMINI_API_KEY` | generativelanguage.googleapis.com | Production. |
 | `ollama` | `OLLAMA_API_KEY` (Bearer) | `OLLAMA_CLOUD_BASE_URL` (default ollama.com) | Hosted Ollama (subscription billing). |
 | `ollama-local` | none (local trust) | `OLLAMA_BASE_URL` (default `http://localhost:11434`; `disabled` to opt out) | Local-network Ollama. |
-| `anthropic-oauth-dev` | OAuth (`loomcycle anthropic login`) | api.anthropic.com | **Research/dev ONLY**, opt-in via `LOOMCYCLE_ANTHROPIC_OAUTH_DEV_ENABLED=1`. Single-machine. **Never** for production, multi-tenant, multi-replica, or customer-facing. Reverse-engineered subscription billing; no SLA. Verify a live token server-side with `loomcycle anthropic status --probe` (post-v0.23.0, F6 — plain `status` reports only local file metadata); concurrent loomcycle processes share the token file safely via a cross-process refresh lock (F7). |
+| `anthropic-oauth-dev` | OAuth (`loomcycle anthropic login`) | api.anthropic.com | **Research/dev ONLY**, opt-in via `LOOMCYCLE_ANTHROPIC_OAUTH_DEV_ENABLED=1`. Single-machine. **Never** for production, multi-tenant, multi-replica, or customer-facing. Reverse-engineered subscription billing; no SLA, ToS risk. Verify a live token server-side with `loomcycle anthropic status --probe` (**v0.23.3**, F6/#392 — plain `status` reports only local file metadata); concurrent loomcycle processes now share the token file safely via a cross-process refresh lock (**v0.23.3**, F7/#391). Setup + robustness walkthrough below. |
 
 A provider with no API key set is marked **excluded** (treated like unreachable)
 and skipped by the resolver. Only set keys for providers you'll use.
@@ -29,6 +29,55 @@ and skipped by the resolver. Only set keys for providers you'll use.
 > set `BRAVE_API_KEY` / `GITHUB_TOKEN` / `SLACK_BOT_TOKEN` / `PG_DSN` /
 > `REDIS_URL`; every other name passes through verbatim. See
 > [webhooks.md](webhooks.md) for the MCP-server secret-injection pattern.
+
+## Robust `anthropic-oauth-dev` setup (research/dev only)
+
+Routes loomcycle through an operator's **Claude subscription** instead of a
+metered `ANTHROPIC_API_KEY`. It is a reverse-engineered, unofficial path — no
+SLA, ToS risk, single-machine, **never** production/multi-tenant/customer-facing.
+With the v0.23.3 fixes (F6 + F7) it is now *reliable enough for a local dev loop*;
+before, it died silently under parallel runs. Five steps, all server-side (this
+is loomcycle's own auth — **not** the plugin's `auth_token` / `/loomcycle:connect`
+bearer, which is unrelated):
+
+1. **Enable the provider** (non-secret, `.env.insecure`): `LOOMCYCLE_ANTHROPIC_OAUTH_DEV_ENABLED=1`.
+   Without it the driver isn't registered and the resolver never sees the provider.
+2. **Authorize once:** `loomcycle anthropic login` (browser OAuth). The token lands
+   at `~/.config/loomcycle/anthropic-oauth.json`, mode `0600` — **outside the repo
+   and the loomcycle DB**, so it is never committed and never hits the F32 at-rest
+   transcript path. Nothing to put in any env file.
+3. **Route it.** Append `anthropic-oauth-dev` **last** in `provider_priority` so
+   unpinned runs still prefer your cheaper primary; **pin it per-agent** to force
+   Claude:
+   ```yaml
+   provider_priority: [deepseek, anthropic-oauth-dev]   # oauth-dev only as last resort
+   # …and on the one agent that should use the subscription:
+   #   provider: anthropic-oauth-dev
+   #   model:    claude-sonnet-4-6
+   ```
+   Subscription models are exposed under the `anthropic-oauth-dev` provider id —
+   reference them there, not under `anthropic`.
+4. **Verify health server-side:** `loomcycle anthropic status --probe` (alias
+   `--verify`). Plain `status` prints **only local token-file metadata** and can
+   read "valid" while Anthropic has already revoked the token (the original F6
+   trap). `--probe` does a *free* token refresh against Anthropic — `✓ valid`
+   (exit 0, and it **rotates + persists a fresh token**, healing the session) or
+   `✗ INVALID` (exit 1, "run `loomcycle anthropic login`"). Also confirm the
+   resolver sees it: `GET /v1/_resolver` should list the provider as reachable.
+5. **(automatic) Concurrent-process safety.** Multiple loomcycle processes sharing
+   one token file (a server + a thin-client run, say) used to race the refresh:
+   the first rotated the refresh token, the rest were stranded with
+   `invalid_grant` until a full re-login (F7). v0.23.3 serializes refresh with a
+   cross-process **`flock`** and a **reload-before-refresh** (a process that
+   blocked on the lock adopts the peer's freshly-rotated token instead of POSTing
+   a now-dead one). The lock auto-releases on close/crash, and a lock-infra
+   failure degrades to best-effort (logs, proceeds) rather than stranding refresh.
+   Nothing to configure — just don't expect it on a pre-v0.23.3 binary.
+
+> **Pre-v0.23.3 fallback.** On the v0.23.0 brew binary, `--probe` doesn't exist
+> (`status` is local-metadata-only, F6) and there is no cross-process lock (F7) —
+> run a single loomcycle process against the OAuth token, and re-`login` whenever
+> inference starts returning `401 invalid_grant`.
 
 ## The 4-layer resolver precedence (highest → lowest)
 
