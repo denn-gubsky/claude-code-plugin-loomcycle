@@ -98,6 +98,28 @@ never in a repo file.
 |---|---|---|
 | `LOOMCYCLE_CHANNELS_LONGPOLL_CAP_MS` | 30000 | Server cap on a `Channel.subscribe` `wait_ms`. A `wait_ms` **larger than the cap is silently truncated** to it (**v0.23.3**, F22/#390: logged once per channel as a runtime `WARNING:` on first truncation). The default 30 s forces a parked subscriber to re-subscribe every 30 s, and **each re-subscribe consumes one `max_iterations`** — so a too-low cap can exhaust a long-idle agent's iteration budget before any message arrives. Raise the cap (e.g. `180000`) and/or the agent's `max_iterations` for webhook/event-driven agents that block waiting for a signal. (Channel access itself is gated per-agent by the `channels:` publish/subscribe ACL — default-deny.) |
 
+> **Fan-in / fan-out primitives (v0.25.0, RFC S).** The `Channel` tool gained
+> `await` (multi-channel fan-in barrier — `any`/`all`/`at_least N` or timeout,
+> non-committing) and `broadcast` (one payload → N channels, atomic ACL
+> pre-flight); `Context` gained `op=time` (an in-run agent clock). These are
+> agent/tool-runtime ops (no `loomcycle.yaml` knob), auto-advertised on the MCP
+> `channel`/`context` meta-tools. **v0.25.1 (F37)** fixed the scheduler's
+> `on_complete: channel.publish` to publish under the channel's **declared**
+> scope — so a scheduler→channel fan-in can use a natural `scope: global`
+> channel instead of the old `scope: user` workaround.
+
+## MCP server (stdio thin client)
+
+These govern the `loomcycle mcp --upstream` process the **plugin itself**
+launches (the thin-client proxy to the runtime's `/v1/_mcp`). Set them in the
+*upstream runtime's* environment — they shape how its `/v1/_mcp` endpoint
+behaves under the plugin's calls.
+
+| Var | Default | Purpose |
+|---|---|---|
+| `LOOMCYCLE_MCP_SPAWN_RUN_TIMEOUT_MS` | off (0) | Operator default transport timeout for `spawn_run` (RFC P): the run is cancelled and `status:"timeout"` returned instead of blocking the call forever. A per-call `timeout_ms` can *narrow* it (not exceed). **v0.24.0 made this apply to the HTTP / `--upstream` path** — i.e. the plugin's topology; before that only the stdio `New` carried it, so `/v1/_mcp` was unbounded. Distinct from the run's own `run_timeout_seconds` budget. |
+| `LOOMCYCLE_MCP_MAX_CONCURRENT_CALLS` | 16 | Bounded slot count for long-running `tools/call` dispatch (RFC O, v0.23.0). Cheap/control tools (`cancel_run`, `list_runs`) stay responsive even when every slot is occupied. stdio-transport only by design. |
+
 ## Concurrency, fairness, provider timeouts
 
 | Var | Default | Purpose |
