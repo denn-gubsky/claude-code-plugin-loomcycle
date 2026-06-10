@@ -4,6 +4,39 @@ All notable changes to this project are documented here. The format follows
 [Keep a Changelog](https://keepachangelog.com/) and the project adheres to
 [Semantic Versioning](https://semver.org/).
 
+## [0.25.1] — 2026-06-10
+
+**Version-vector track to loomcycle v0.25.1** (loomcycle shipped v0.24.0 →
+v0.25.0 → v0.25.1 since the plugin's 0.23.5 grounding). Docs-only; re-verified
+by direct read of loomcycle source at the **v0.25.1 tag**. The MCP meta-tool
+contract is unchanged — the only `internal/api/mcp/tools.go` diff is the
+`channel` and `context` tool *descriptions* gaining the new ops below — so the
+plugin's commands, skills, and the `mcp --upstream` thin-client wiring need no
+behavior change. Version bump `0.23.5 → 0.25.1` (`plugin.json` +
+`marketplace.json`).
+
+### Added
+- **`LOOMCYCLE_MCP_SPAWN_RUN_TIMEOUT_MS` + `LOOMCYCLE_MCP_MAX_CONCURRENT_CALLS`**
+  (`env-vars.md`, new *MCP server (stdio thin client)* section) — the knobs that
+  govern the `loomcycle mcp --upstream` process the **plugin itself** runs.
+  **v0.24.0** made the `spawn_run` transport timeout (RFC P) finally apply to the
+  HTTP / `--upstream` path — i.e. the plugin's exact topology; before that
+  `/v1/_mcp` was unbounded. `MAX_CONCURRENT_CALLS` (RFC O, default 16) is the
+  concurrent-dispatch slot count.
+- **Per-tenant webhook route** (`webhooks.md`) — **v0.24.0 (RFC N)**:
+  `POST /v1/_webhooks/{tenant}/{name}` resolves a webhook authored under a
+  non-empty tenant (path-authoritative); bare `/{name}` stays shared `""`. With
+  the operator action to register the `/{tenant}/` prefix at the sender.
+- **RFC S fan-in/fan-out note** (`env-vars.md`, Channels) — **v0.25.0**:
+  `Channel.await` / `Channel.broadcast` and `Context op=time` (auto-advertised on
+  the MCP `channel`/`context` meta-tools), plus **F37 (v0.25.1)**: the scheduler's
+  `on_complete: channel.publish` now publishes under the channel's **declared**
+  scope, so a scheduler→channel fan-in can use a natural `scope: global` channel.
+
+### Changed
+- README compatibility row + skill version-grounding extended from the v0.23.5
+  tag to the **v0.25.1** tag. Prior v0.23.x grounding kept as accurate history.
+
 ## [0.23.5] — 2026-06-09
 
 **Re-verification + version-grounding pass against loomcycle's real release

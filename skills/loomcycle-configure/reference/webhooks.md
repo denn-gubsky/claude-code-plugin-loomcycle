@@ -188,6 +188,21 @@ resolves to empty + a trace note — never a hard failure.
 > attacker-influenceable body can't steer the run into another tenant's
 > agents/skills/memory.
 
+### Per-tenant route (v0.24.0, RFC N wire change)
+
+v0.24.0 extended the RFC N tenant axis to webhooks (and all 8 def families).
+A webhook authored under a **non-empty tenant** is reached at
+**`POST /v1/_webhooks/{tenant}/{name}`** — the tenant is path-authoritative,
+resolved from the route, never the body. The bare-root
+**`POST /v1/_webhooks/{name}`** still resolves under the shared `""` tenant, so
+existing single-tenant webhooks are unchanged. The admin `/test` dry-run
+resolves under the caller's principal tenant.
+
+> **Action for multi-tenant operators:** if you author a webhook under a tenant,
+> register its delivery URL with the `/{tenant}/` prefix at the sender (GitHub,
+> Stripe, …) — the bare `/{name}` URL will 404 (or resolve the wrong, shared-`""`
+> def). Single-tenant / open-mode deployments need no change.
+
 ### Per-run MCP credentials for the spawned run
 
 A spawn run wires MCP-tool bearers exactly like a scheduled run:
