@@ -30,10 +30,18 @@ that server and wraps the common workflows in operator-friendly commands.
 
 ## Install
 
+Run these in Claude Code (the marketplace registers under the name `loomcycle`,
+declared in `marketplace.json`):
+
 ```text
 /plugin marketplace add denn-gubsky/claude-code-plugin-loomcycle
-/plugin install loomcycle
+/plugin install loomcycle@loomcycle
 ```
+
+`loomcycle@loomcycle` reads as "the **loomcycle** plugin from the **loomcycle**
+marketplace" — the `@loomcycle` suffix disambiguates if you have other
+marketplaces installed (the bare `/plugin install loomcycle` also works when
+it's unambiguous).
 
 At install you'll be prompted for:
 
@@ -60,6 +68,35 @@ own** — no providers, scheduler, sweepers, or port to bind.
 > **You must have a loomcycle instance running at `base_url`** (start it
 > separately via `loomcycle`/`brew services`/Docker); the plugin no longer
 > starts one. Requires a loomcycle build that supports `loomcycle mcp --upstream`.
+
+## Update
+
+The marketplace tracks `main`, so updating is two steps — **refresh the
+marketplace cache from git, then update the installed plugin**:
+
+```text
+/plugin marketplace update loomcycle
+/plugin update loomcycle@loomcycle
+```
+
+- The first command re-pulls `marketplace.json` + the plugin from GitHub; the
+  second installs the new version. **Run them in this order** — `/plugin update`
+  alone won't see a new release until the marketplace cache is refreshed (a stale
+  cache is also why a fresh `add` can appear to "do nothing" after a release).
+- Re-running `/plugin install` on an already-installed plugin does **not**
+  upgrade it — use `/plugin update`.
+- Prefer hands-off? Open `/plugin` → **Marketplaces** → select `loomcycle` →
+  enable **auto-update**, and it pulls new releases at startup.
+- After updating, **restart Claude Code** so the bundled `.mcp.json` (the
+  `loomcycle mcp --upstream` server) is relaunched with any wiring changes.
+
+To pin or roll back to an exact release, add the marketplace at a tag and
+reinstall:
+
+```text
+/plugin marketplace add denn-gubsky/claude-code-plugin-loomcycle#v0.32.0
+/plugin install loomcycle@loomcycle
+```
 
 ## Commands
 

@@ -47,6 +47,11 @@ wiring is unchanged, so `.mcp.json` needs no edit. Version bump
   expand inner `${LOOMCYCLE_*}` at create/fork.
 - README compatibility row + commands table; `SKILL.md` description/altitude now
   mention sampling + compaction. Prior version-grounding kept as history.
+- **README gains an explicit Install + Update section** with the exact Claude
+  Code commands: `/plugin marketplace add …` + `/plugin install loomcycle@loomcycle`,
+  and the two-step update (`/plugin marketplace update loomcycle` →
+  `/plugin update loomcycle@loomcycle`) with the stale-cache ordering caveat, the
+  auto-update toggle, the restart note, and the `#<tag>` pin/rollback form.
 
 ## [0.25.1] — 2026-06-10
 
