@@ -1,6 +1,6 @@
 ---
 name: loomcycle-configure
-description: Configure a loomcycle runtime — providers, model tiers, user tiers, fallbacks, environment variables, deployment profiles (brew/in-system, containerized, true sandbox, server, multi-tenant, cloud), inbound webhooks, and third-party MCP servers. Use when the user wants to set up or tune loomcycle.yaml or its env, pick a deployment posture, wire provider routing/cost-cascades, gate plans, lock down tool/sandbox/auth, receive webhooks, or connect external MCP tools.
+description: Configure a loomcycle runtime — providers, model tiers, user tiers, fallbacks, per-agent sampling and context-compaction, environment variables, deployment profiles (brew/in-system, containerized, true sandbox, server, multi-tenant, cloud), inbound webhooks, and third-party MCP servers. Use when the user wants to set up or tune loomcycle.yaml or its env, pick a deployment posture, wire provider routing/cost-cascades, gate plans, tune decoding (temperature/top_p) or compaction, lock down tool/sandbox/auth, receive webhooks, or connect external MCP tools.
 allowed-tools: Read Write Edit Bash(loomcycle validate*) Bash(loomcycle doctor*) Bash(loomcycle init*)
 ---
 
@@ -100,9 +100,10 @@ lists the exact env set, the yaml shape, and the sharp edges.
 
 - **[reference/routing.md](reference/routing.md)** — providers + API-key env
   vars, the 4-layer resolver precedence, `tiers` / `user_tiers` / `models:`
-  aliases / per-agent overrides, `fallback_on_error`, and the four cookbook
-  patterns (single/multi provider × single/multi user-tier). Read this for any
-  routing question.
+  aliases / per-agent overrides, `fallback_on_error`, the four cookbook
+  patterns (single/multi provider × single/multi user-tier), and the per-agent
+  `sampling:` (temperature/top_p/…) and `compaction:` blocks. Read this for any
+  routing, decoding, or compaction question.
 - **[reference/profiles.md](reference/profiles.md)** — the six deployment
   profiles in full: trust posture, exact env set, yaml skeleton, and sharp
   edges per profile.

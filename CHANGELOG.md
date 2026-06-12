@@ -4,6 +4,50 @@ All notable changes to this project are documented here. The format follows
 [Keep a Changelog](https://keepachangelog.com/) and the project adheres to
 [Semantic Versioning](https://semver.org/).
 
+## [0.32.0] — 2026-06-12
+
+**Version-vector track to loomcycle v0.32.0** (loomcycle jumped v0.25.1 →
+v0.32.0). Verified by direct read of loomcycle source at HEAD. The MCP contract
+change is **additive** (40 → 42 meta-tools) and the `mcp --upstream` thin-client
+wiring is unchanged, so `.mcp.json` needs no edit. Version bump
+`0.25.1 → 0.32.0` (`plugin.json` + `marketplace.json`).
+
+### Added
+
+- **`/loomcycle:fanout`** (`commands/fanout.md`) → the new **`spawn_runs`** tool
+  (RFC Y, PR #464): fan out up to **32 fresh runs of one agent in a single
+  call**, block until all settle, render the index-aligned envelope; a per-child
+  failure is reported in-table and never fails the batch. Prefer over N serial
+  `/loomcycle:run` calls.
+- **`/loomcycle:compact`** (`commands/compact.md`) → the new **`compact_run`**
+  tool (PR #465): summarize a **parked** run's history (`{compacted,
+  before_tokens, after_tokens, applied}`; `applied ∈ live/marker/noop`). A
+  mid-turn run is refused — surfaced as expected, not a bug.
+- **`/loomcycle:run --compact`** — sets `spawn_run`'s new optional `compaction`
+  field (`{enabled:true}`) for per-run auto-compaction.
+- **Per-agent `sampling:` block** (`routing.md`, loomcycle v0.28.0/#447):
+  `temperature`/`top_p`/`top_k`/`frequency_penalty`/`presence_penalty`/`seed`/
+  `stop`; documents the Anthropic temperature/top_p ⊥ extended-thinking rule.
+- **Per-agent `compaction:` block** (`routing.md`, v0.32.0): `enabled` /
+  `target_percentage` / `keep_last_n` / `keep_first` / `autocompact_at_pct` /
+  `model`; spawn-tree inheritance + the per-run override + `compact_run` trigger.
+- **`LOOMCYCLE_RESUME_FANOUT`** (`env-vars.md`, v0.31.0/#457, default OFF) — new
+  "Pause / resume" section: durable park+resume of a fan-out parent blocked in
+  `parallel_spawn`.
+
+### Fixed / Changed
+
+- **`${}` interpolation deny-list corrected** (`routing.md` + `webhooks.md`,
+  loomcycle v0.32.0/#462/exp7-C2): the docs wrongly listed **`PG_DSN`** as
+  interpolatable. The real allowlist is any `LOOMCYCLE_`-prefixed name plus
+  `BRAVE_API_KEY`/`GITHUB_TOKEN`/`SLACK_BOT_TOKEN`/`REDIS_URL`; `PG_DSN`,
+  `LOOMCYCLE_PG_DSN`, and `LOOMCYCLE_AUTH_TOKEN` are now **explicitly denied**
+  (infra-secret exfiltration guard), and `\r`/`\n` values are rejected.
+- **F39 note** (`webhooks.md`, v0.25.3): runtime-authored stdio MCP servers now
+  expand inner `${LOOMCYCLE_*}` at create/fork.
+- README compatibility row + commands table; `SKILL.md` description/altitude now
+  mention sampling + compaction. Prior version-grounding kept as history.
+
 ## [0.25.1] — 2026-06-10
 
 **Version-vector track to loomcycle v0.25.1** (loomcycle shipped v0.24.0 →

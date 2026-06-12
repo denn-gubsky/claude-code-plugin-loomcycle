@@ -285,6 +285,10 @@ mcp_servers:
   server is **gated off by default** (`LOOMCYCLE_MCP_ALLOW_DYNAMIC_STDIO=1`, F31)
   because it runs an arbitrary local command — **v0.23.3** lifted the old
   "stdio can't be dynamic" hard rule, but kept it behind that flag.
+  **v0.25.3 (F39)**: a runtime-authored MCP server's inner `${LOOMCYCLE_*}`
+  references are now expanded at create/fork time (same allowlist + deny-list as
+  static yaml), so a dynamically-registered server resolves its own secret env
+  the same way a static one does.
 - The **server process holds the token** (in its own env); the agent's Bash
   never sees it.
 
@@ -305,11 +309,21 @@ mcp_servers:
 `${VAR}` in a yaml string expands **only** for an allowlisted name. Everything
 else passes through **verbatim** — the MCP server then receives the literal
 string `${GITEA_ACCESS_TOKEN}` and `401`s on every call. The allowlist (from
-`config.go::expandEnvAllowed`) is:
+`config.go::ExpandEnvAllowed`) is:
 
 - **any `LOOMCYCLE_`-prefixed name** (the project's own namespace), plus
 - the hardcoded third-party set: **`BRAVE_API_KEY`, `GITHUB_TOKEN`,
-  `SLACK_BOT_TOKEN`, `PG_DSN`, `REDIS_URL`** — and nothing else.
+  `SLACK_BOT_TOKEN`, `REDIS_URL`** — and nothing else.
+
+> **Deny-list (v0.32.0, #462 / exp7-C2) — overrides the allowlist:** `PG_DSN`,
+> `LOOMCYCLE_PG_DSN`, and `LOOMCYCLE_AUTH_TOKEN` are **never** interpolated, even
+> though the `LOOMCYCLE_` prefix would otherwise allow the latter two — they are
+> loomcycle's own DB/admin credentials, and expanding them into an outbound MCP
+> URL/header would leak infra creds to a third party. (Earlier drafts of this doc
+> listed `PG_DSN` as allowlisted — it is not, and is now explicitly denied.) An
+> expanded value containing `\r`/`\n` is also rejected (yaml-injection guard).
+> Per-MCP auth tokens are fine — name them `LOOMCYCLE_<SERVICE>_TOKEN` and the
+> deny-list (a tight named set, not a suffix match) won't touch them.
 
 So `${GITEA_ACCESS_TOKEN}`, `${TELEGRAM_BOT_TOKEN}`, `${OPENAI_API_KEY}` do
 **not** expand. The fix is to name your secret `LOOMCYCLE_*` in `.env.local` and
