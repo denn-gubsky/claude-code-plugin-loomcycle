@@ -213,6 +213,18 @@ it's a feature request on the loomcycle repo — the plugin ships no workarounds
   Code spawns MCP servers with a sparse environment; if your yaml uses
   `${...}` env placeholders, populate them or wrap the binary in a script that
   sources your env first.
+- **Wrong binary / "command not found" after moving machines or switching OS**
+  (e.g. a Linux `bin_path` carried onto macOS) — the committed `.mcp.json` is a
+  *template* (`${user_config.bin_path}` / `${user_config.base_url}`); Claude Code
+  resolves those to concrete values **at install time** and stores them in its
+  own settings, **not** in this repo, so a path baked on one machine is stale on
+  another. Fix it where it lives: `/plugin` → manage **loomcycle** → **Configure**
+  → set `bin_path` to `loomcycle` (PATH lookup — most portable) or the platform
+  path (`/opt/homebrew/bin/loomcycle` on Apple Silicon, `/usr/local/bin/loomcycle`
+  on Intel), confirm `base_url`, then **restart Claude Code**. Don't hand-edit the
+  resolved `.mcp.json` in your live config — that's the plugin's running MCP
+  startup config and editing it is correctly blocked; reconfigure via `/plugin`
+  instead (reinstalling re-prompts for these fields too).
 - **An `env` change in `settings.json` / `settings.local.json` didn't take
   effect** — the respawned `loomcycle mcp` server inherits the environment Claude
   Code itself started with, so a `/reload-plugins` does **not** re-read
