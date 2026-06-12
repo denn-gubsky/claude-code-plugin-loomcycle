@@ -4,6 +4,18 @@ All notable changes to this project are documented here. The format follows
 [Keep a Changelog](https://keepachangelog.com/) and the project adheres to
 [Semantic Versioning](https://semver.org/).
 
+## [Unreleased]
+
+### Changed
+
+- **README Troubleshooting** — added a "wrong binary / stale `bin_path` after
+  moving machines or switching OS" entry. Clarifies that the committed
+  `.mcp.json` is a placeholder template (`${user_config.*}`) resolved at install
+  time into Claude Code's own settings — so a path baked on one machine is stale
+  on another, and the fix is `/plugin` → Configure (set `bin_path=loomcycle` for
+  PATH) + restart, **not** hand-editing the live resolved `.mcp.json` (which is
+  correctly blocked as the plugin's own MCP startup config).
+
 ## [0.32.0] — 2026-06-12
 
 **Version-vector track to loomcycle v0.32.0** (loomcycle jumped v0.25.1 →
