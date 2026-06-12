@@ -26,9 +26,17 @@ and skipped by the resolver. Only set keys for providers you'll use.
 > `${ANTHROPIC_API_KEY}` a secret into an outbound MCP header). `${}`
 > interpolation is for `mcp_servers:` (and other outbound string fields) only,
 > and is itself allowlisted — any `LOOMCYCLE_`-prefixed name plus the hardcoded
-> set `BRAVE_API_KEY` / `GITHUB_TOKEN` / `SLACK_BOT_TOKEN` / `PG_DSN` /
-> `REDIS_URL`; every other name passes through verbatim. See
-> [webhooks.md](webhooks.md) for the MCP-server secret-injection pattern.
+> set `BRAVE_API_KEY` / `GITHUB_TOKEN` / `SLACK_BOT_TOKEN` / `REDIS_URL`; every
+> other name passes through verbatim.
+>
+> **Deny-list (v0.32.0, #462 / exp7-C2):** `PG_DSN`, `LOOMCYCLE_PG_DSN`, and
+> `LOOMCYCLE_AUTH_TOKEN` are **never** interpolated — even though the
+> `LOOMCYCLE_` prefix would otherwise allow them — because they are loomcycle's
+> own infra/admin credentials; interpolating them into an outbound MCP URL/header
+> would exfiltrate loomcycle's own creds to a third party. (They reach the runtime
+> via the `Env` struct, never via yaml, so denying them breaks nothing.) An
+> expanded value containing `\r`/`\n` is also rejected (yaml-injection guard).
+> See [webhooks.md](webhooks.md) for the MCP-server secret-injection pattern.
 
 ## Robust `anthropic-oauth-dev` setup (research/dev only)
 
@@ -224,6 +232,57 @@ The operator-yaml `agents:` map overrides any frontmatter field per-deployment:
 scalars — non-zero yaml wins; slices/maps — yaml `nil` keeps the discovered
 value, yaml non-nil (even `[]`) is an explicit override; set `model: ""` to
 *clear* a discovered pin and fall back to `tier:`.
+
+## Per-agent `sampling:` block (v0.28.0)
+
+Tune the LLM decoding params per agent (or per-run, or via the `agents:`
+overlay). All optional; omit the block for provider defaults.
+
+```yaml
+sampling:
+  temperature: 0.2          # float
+  top_p: 0.9                # float
+  top_k: 40                 # int
+  frequency_penalty: 0.0    # float
+  presence_penalty: 0.0     # float
+  seed: 42                  # int — reproducibility where the provider supports it
+  stop: ["\n\n###"]         # []string stop sequences
+```
+
+- Mapped to each provider's request params; a param a provider doesn't support
+  is dropped.
+- **Anthropic mutual-exclusion:** when an `effort` (extended-thinking) hint is
+  attached, the Anthropic driver **drops `temperature`/`top_p`** (the API forbids
+  both) — pick reasoning-effort *or* temperature shaping, not both.
+- Surfaced on the agent-def overlay, per-run params, and `Context op=self`
+  (which reports the *resolved* sampling). Flows down the spawn tree.
+
+## Per-agent `compaction:` block (v0.32.0)
+
+Context-compaction: summarise old conversation turns to keep a long run inside
+the window. Optional; off unless `enabled: true`.
+
+```yaml
+compaction:
+  enabled: true             # turn AUTO-compaction on
+  target_percentage: 10     # 10–50; summary aims for ~N% of the compacted span (default 10)
+  keep_last_n: 4            # keep the last N messages verbatim (default 4; 0 = summarize all)
+  keep_first: true          # pin the first user message (the task) verbatim (default true)
+  autocompact_at_pct: 80    # 50–95; auto-compact when used/window ≥ N% (default 80, needs a provider window)
+  model: claude-haiku-4-5   # optional cheaper/faster summary model (same provider)
+```
+
+- **Flows down the spawn tree** with per-field precedence: child def is the
+  fallback, a parent-set value wins, a per-spawn override wins all.
+- **Per-run override:** the `spawn_run` MCP tool takes an optional `compaction`
+  object (merged per-field over this block) — `/loomcycle:run --compact` sets
+  `enabled: true` for one run.
+- **Trigger manually:** the `compact_run` MCP tool compacts a *parked* run on
+  demand (`/loomcycle:compact <agent_id>`); `Context op=compact` is the in-agent
+  equivalent.
+- Durable park+resume of a fan-out parent blocked in `parallel_spawn` is a
+  separate, runtime-level opt-in — see `LOOMCYCLE_RESUME_FANOUT` in
+  [env-vars.md](env-vars.md).
 
 ## Config-load errors (what they mean)
 

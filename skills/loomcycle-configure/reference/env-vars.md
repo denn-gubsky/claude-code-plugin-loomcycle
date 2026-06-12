@@ -120,6 +120,19 @@ behaves under the plugin's calls.
 | `LOOMCYCLE_MCP_SPAWN_RUN_TIMEOUT_MS` | off (0) | Operator default transport timeout for `spawn_run` (RFC P): the run is cancelled and `status:"timeout"` returned instead of blocking the call forever. A per-call `timeout_ms` can *narrow* it (not exceed). **v0.24.0 made this apply to the HTTP / `--upstream` path** — i.e. the plugin's topology; before that only the stdio `New` carried it, so `/v1/_mcp` was unbounded. Distinct from the run's own `run_timeout_seconds` budget. |
 | `LOOMCYCLE_MCP_MAX_CONCURRENT_CALLS` | 16 | Bounded slot count for long-running `tools/call` dispatch (RFC O, v0.23.0). Cheap/control tools (`cancel_run`, `list_runs`) stay responsive even when every slot is occupied. stdio-transport only by design. |
 
+> **MCP tool set (v0.32.0):** the meta-tool catalogue grew to 42 — two new
+> tools the plugin wraps as `/loomcycle:fanout` and `/loomcycle:compact`:
+> **`spawn_runs`** (RFC Y external fan-out — ≤32 fresh runs in one call,
+> index-aligned envelope, per-child failures don't fail the batch) and
+> **`compact_run`** (summarise a *parked* run's history). `spawn_run` also gained
+> an optional per-run `compaction` override. None changes the `--upstream` wiring.
+
+## Pause / resume
+
+| Var | Default | Purpose |
+|---|---|---|
+| `LOOMCYCLE_RESUME_FANOUT` | off (0) | **(v0.31.0, RFC X Phase 3)** `1` enables durable park+resume of a **fan-out parent** blocked in `Agent.parallel_spawn` — loomcycle captures spawn-ledger events so a parent quiesced by pause (or a crashed/restarted replica) re-dispatches its in-flight children from the transcript instead of stranding them. Default OFF keeps the pre-v0.31 pause/resume/snapshot paths byte-identical; opt in for long fan-out orchestrations that must survive a restart. (Single-run cross-instance resume needs no flag — v0.30.0.) |
+
 ## Concurrency, fairness, provider timeouts
 
 | Var | Default | Purpose |

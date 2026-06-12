@@ -30,10 +30,18 @@ that server and wraps the common workflows in operator-friendly commands.
 
 ## Install
 
+Run these in Claude Code (the marketplace registers under the name `loomcycle`,
+declared in `marketplace.json`):
+
 ```text
 /plugin marketplace add denn-gubsky/claude-code-plugin-loomcycle
-/plugin install loomcycle
+/plugin install loomcycle@loomcycle
 ```
+
+`loomcycle@loomcycle` reads as "the **loomcycle** plugin from the **loomcycle**
+marketplace" — the `@loomcycle` suffix disambiguates if you have other
+marketplaces installed (the bare `/plugin install loomcycle` also works when
+it's unambiguous).
 
 At install you'll be prompted for:
 
@@ -61,6 +69,35 @@ own** — no providers, scheduler, sweepers, or port to bind.
 > separately via `loomcycle`/`brew services`/Docker); the plugin no longer
 > starts one. Requires a loomcycle build that supports `loomcycle mcp --upstream`.
 
+## Update
+
+The marketplace tracks `main`, so updating is two steps — **refresh the
+marketplace cache from git, then update the installed plugin**:
+
+```text
+/plugin marketplace update loomcycle
+/plugin update loomcycle@loomcycle
+```
+
+- The first command re-pulls `marketplace.json` + the plugin from GitHub; the
+  second installs the new version. **Run them in this order** — `/plugin update`
+  alone won't see a new release until the marketplace cache is refreshed (a stale
+  cache is also why a fresh `add` can appear to "do nothing" after a release).
+- Re-running `/plugin install` on an already-installed plugin does **not**
+  upgrade it — use `/plugin update`.
+- Prefer hands-off? Open `/plugin` → **Marketplaces** → select `loomcycle` →
+  enable **auto-update**, and it pulls new releases at startup.
+- After updating, **restart Claude Code** so the bundled `.mcp.json` (the
+  `loomcycle mcp --upstream` server) is relaunched with any wiring changes.
+
+To pin or roll back to an exact release, add the marketplace at a tag and
+reinstall:
+
+```text
+/plugin marketplace add denn-gubsky/claude-code-plugin-loomcycle#v0.32.0
+/plugin install loomcycle@loomcycle
+```
+
 ## Commands
 
 All commands are namespaced under the plugin name: `/loomcycle:<command>`.
@@ -68,7 +105,9 @@ All commands are namespaced under the plugin name: `/loomcycle:<command>`.
 | Command | Wraps | Purpose |
 |---|---|---|
 | `/loomcycle:connect [--user=<id>] [--bearer=<tok>] [--base-url=<url>] [--persist]` | (session state) | Set the active loomcycle identity reused by later commands. The bearer is the per-run `user_bearer`, not the API token. |
-| `/loomcycle:run <agent> [--user=<id>] <prompt…>` | `spawn_run` | Spawn a run; the result (final text + `agent_id` cancel handle + `run_id`) streams back. |
+| `/loomcycle:run <agent> [--user=<id>] [--compact] <prompt…>` | `spawn_run` | Spawn a run; the result (final text + `agent_id` cancel handle + `run_id`) streams back. `--compact` turns on per-run context-compaction (≥ v0.32). |
+| `/loomcycle:fanout <agent> [--count=N] [--user=<id>] <prompt…>` | `spawn_runs` | Fan out up to 32 concurrent runs of one agent in a single call; renders the index-aligned results table (≥ v0.32). |
+| `/loomcycle:compact <agent_id> [--reason=<text>]` | `compact_run` | Summarize a **parked** run's history to free context, then continue (≥ v0.32). |
 | `/loomcycle:runs [--user=<id>] [--status=<s>] [--limit=<n>]` | `list_runs` | List recent runs as a table. `user_id` is required (set it once via connect). |
 | `/loomcycle:cancel <agent_id> [--reason=<text>]` | `cancel_run` | Cancel a running agent; cascades to sub-agents; idempotent. |
 | `/loomcycle:snapshot <create\|list\|restore\|delete> [id]` | the 4 snapshot tools | Runtime snapshot ops from the IDE. Restore/delete confirm first. |
@@ -151,6 +190,7 @@ claude plugin validate ./claude-code-plugin-loomcycle   # validate before publis
 
 | This plugin | loomcycle | Claude Code |
 |---|---|---|
+| 0.32.0 | Same runtime requirement as 0.21.0 (`loomcycle mcp --upstream` thin client; an instance running at `base_url`). Re-grounded against loomcycle source at the **v0.32.0 tag** (loomcycle shipped v0.25.1 → v0.32.0). **MCP contract grew 40 → 42 tools** (both additive): `spawn_runs` (RFC Y external fan-out, ≤32 runs/call → `/loomcycle:fanout`) and `compact_run` (summarize a parked run → `/loomcycle:compact`); `spawn_run` gained an optional `compaction` field (→ `/loomcycle:run --compact`). Skill grounding adds the per-agent `sampling:` (v0.28.0) + `compaction:` (v0.32.0) blocks, `LOOMCYCLE_RESUME_FANOUT` (v0.31.0), and the corrected `${}` deny-list (`PG_DSN`/`LOOMCYCLE_PG_DSN`/`LOOMCYCLE_AUTH_TOKEN` never interpolated, v0.32.0/#462). Thin-client `--upstream` wiring unchanged. | ≥ 2.1 |
 | 0.25.1 | Same runtime requirement as 0.21.0 (`loomcycle mcp --upstream` thin client). **Docs-only**, re-grounded against loomcycle source at the **v0.25.1 tag** (loomcycle shipped v0.24.0 → v0.25.0 → v0.25.1). MCP tool contract unchanged (the `channel`/`context` descriptions gained the new ops). Adds: **`LOOMCYCLE_MCP_SPAWN_RUN_TIMEOUT_MS` now applies to the `--upstream`/`/v1/_mcp` path** the plugin uses (v0.24.0); the **per-tenant webhook route** `POST /v1/_webhooks/{tenant}/{name}` (v0.24.0, RFC N); the **RFC S fan-in/fan-out primitives** (`Channel.await`/`broadcast`, `Context op=time`, ScheduleDef `max_fires` — v0.25.0); and the **F37** scheduler `channel.publish` declared-scope fix (v0.25.1). No plugin command/skill behavior change — pure version-grounding. | ≥ 2.1 |
 | 0.23.5 | Same runtime requirement as 0.21.0 (`loomcycle mcp --upstream` thin client; an instance running at `base_url`). **Docs-only**, re-verified against loomcycle source at the **v0.23.5 tag**. Replaces the prior "post-v0.23.0 `main`" hedging with concrete tags now that they exist (loomcycle went **v0.23.0 → v0.23.3 → v0.23.4 → v0.23.5**, no v0.23.1/v0.23.2): **robust `anthropic-oauth-dev`** (`status --probe` F6/#392 + cross-process refresh lock F7/#391, both **v0.23.3**); the dynamic substrate (webhook→AgentDef-agent spawn F30/#403, gated dynamic-stdio MCP F31/#405, both v0.23.3); **secret redaction at rest** (F32, **v0.23.4**); and **dynamic-MCP tools advertised at run start** so single-tool notifier agents fire (F33, **v0.23.5**). Each post-v0.23.0 feature is still flagged with its v0.23.0-binary fallback, so the docs hold whether the operator runs v0.23.0 or v0.23.5. | ≥ 2.1 |
 | 0.23.2 | Same runtime requirement as 0.21.0. Docs-only — `loomcycle-configure` reconciled against loomcycle `main` (then-unreleased post-v0.23.0): inbound webhooks, third-party MCP, the two-layer tool gate, and the `.env.local`/`.env.insecure` split. *(Superseded by 0.23.5, which pins those fixes to the v0.23.3 tag.)* | ≥ 2.1 |
