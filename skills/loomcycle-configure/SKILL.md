@@ -96,6 +96,55 @@ Profiles are cumulative: 5 builds on 4, 6 builds on 5. Read the matching section
 of [reference/profiles.md](reference/profiles.md) before emitting config — each
 lists the exact env set, the yaml shape, and the sharp edges.
 
+## Volume primitive (RFC AH) — v1.0.3+
+
+**RFC AH replaces the env-var file jail with a `volumes:` block in `loomcycle.yaml`.** The old
+vars `LOOMCYCLE_READ_ROOT`, `LOOMCYCLE_WRITE_ROOT`, and `LOOMCYCLE_BASH_CWD` are **retired
+(Phase 3 — fatal config-load error in v1.0.3+)**. Remove them from env files before upgrading.
+
+### Quick migration (most configs)
+
+In most configs all three vars pointed at the same directory. One block replaces all three:
+
+```yaml
+volumes:
+  default:
+    path: ./work    # relative to the dir run.sh cd's into
+    mode: rw        # rw = Read+Write+Edit+Bash; ro = Read/Grep/Glob only
+    default: true   # agents without an explicit `volumes:` list bind here
+
+# Required only if any agent uses VolumeDef (mkdir -p ./work/dynamic first):
+  dynamic-root:
+    path: ./work/dynamic
+    mode: rw
+    dynamic_root: true
+```
+
+### VolumeDef tool (Phase 2a/2b — agent-provisioned volumes)
+
+Agents can provision volumes at runtime with `VolumeDef op=create`. Two gates required:
+
+1. `volume_def_scopes: [any]` on the agent (per-agent capability gate)
+2. A `dynamic_root: true` volume in `volumes:` (backing store for provisioned volumes)
+
+`ephemeral: true` makes the volume auto-purge when the creating run ends — no `rm -rf` needed.
+Sub-agents inherit the dispatcher's volumes via spawn narrowing; address files with `volume="name"`.
+
+### `defaults:` block — required for `loomcycle validate`
+
+```yaml
+defaults:
+  provider: deepseek
+  model:    deepseek-v4-pro
+```
+
+`loomcycle validate` uses a static dry-run resolver — it errors `no provider resolved` unless a
+`defaults:` block is present. **Inert at runtime** (the tier resolver ignores it). Add it to every
+config so `validate` works without a live provider environment.
+
+**Full reference:** [reference/volumes.md](reference/volumes.md) — migration table, field reference,
+VolumeDef op catalogue, spawn narrowing, validation errors.
+
 ## Reference files (read on demand)
 
 - **[reference/routing.md](reference/routing.md)** — providers + API-key env
@@ -104,13 +153,19 @@ lists the exact env set, the yaml shape, and the sharp edges.
   patterns (single/multi provider × single/multi user-tier), and the per-agent
   `sampling:` (temperature/top_p/…) and `compaction:` blocks. Read this for any
   routing, decoding, or compaction question.
+- **[reference/volumes.md](reference/volumes.md)** — Volume primitive (RFC AH,
+  v1.0.3+): `volumes:` block fields, per-agent binding, VolumeDef tool + gates,
+  ephemeral volumes, spawn narrowing, migration from legacy jail vars, validation
+  errors. Read this for any file-tool sandboxing, `VolumeDef`, or Phase 3
+  migration question.
 - **[reference/profiles.md](reference/profiles.md)** — the six deployment
   profiles in full: trust posture, exact env set, yaml skeleton, and sharp
   edges per profile.
 - **[reference/env-vars.md](reference/env-vars.md)** — the grouped environment
   variable catalogue (identity/listen, storage, tool sandboxes, providers,
   memory, scheduler/webhooks/A2A, code-js, multi-tenant, observability,
-  cluster). Look up any `LOOMCYCLE_*` here before recommending it.
+  cluster). Look up any `LOOMCYCLE_*` here before recommending it. Note: three
+  vars are **retired (v1.0.3)** — see the tool-sandboxes section.
 - **[reference/webhooks.md](reference/webhooks.md)** — inbound webhooks
   (`webhooks:` block — enable, the `enabled`+`delivery` requirement + v0.23.3
   boot-validation, the webhook secret-resolution rules (`LOOMCYCLE_*` auto-allow /
