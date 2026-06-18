@@ -290,6 +290,11 @@ compaction:
 |---|---|
 | `cannot set both explicit provider/model pin and tier` | Pick one on that agent. |
 | `no model, no tier, and no defaults.model` | Give the agent a `tier:`/pin, or set `defaults.model`. |
+| `agent "X": no provider resolved` | Add a `defaults: {provider: …, model: …}` block (required for `loomcycle validate`'s dry-run resolver; inert at runtime). |
 | `user_tiers: missing "default" entry` | Add a `default:` overlay. |
 | `unknown provider: X` | `X` isn't a registered driver — check spelling against the provider table. |
 | `model alias cycle: X → Y → X` | Break the cycle in `models:`. |
+| `LOOMCYCLE_READ_ROOT (or WRITE_ROOT / BASH_CWD) is set but retired` | **Phase 3 breaking change (v1.0.3).** Remove the var from env; use `volumes:` block. See [volumes.md](volumes.md). |
+| `volumes: referenced volume "X" not defined` | Declare `X` under `volumes:` or remove it from the agent's `volumes:` list. |
+| `volumes: dynamic-root required for VolumeDef` | Add `dynamic_root: true` to a `volumes:` entry and list it in the agent's `volumes:`. |
+| `volumes: more than one volume has default: true` | Set `default: true` on exactly one volume. |

@@ -48,12 +48,17 @@ never in a repo file.
 
 ## Built-in tool sandboxes (default-deny — each tool refuses until set)
 
+> **RFC AH Volume primitive (v1.0.3+)** replaces `READ_ROOT` / `WRITE_ROOT` / `BASH_CWD` with a
+> `volumes:` block in `loomcycle.yaml`. All three vars are **fatal config-load errors** in v1.0.3+
+> (Phase 3 breaking change) — remove them before upgrading. Use `volumes: default: {path: <dir>,
+> mode: rw, default: true}` instead. Full migration guide: [volumes.md](volumes.md).
+
 | Var | Purpose |
 |---|---|
-| `LOOMCYCLE_READ_ROOT` | `Read` tool: agents may read files **inside this dir only**. Symlinks resolved before the check (no escape). Unset = Read refuses every call. |
-| `LOOMCYCLE_WRITE_ROOT` | `Write`+`Edit` tools: same shape; atomic tempfile+rename. Unset = refuse. |
+| ~~`LOOMCYCLE_READ_ROOT`~~ | **⚠️ RETIRED — v1.0.3+ (RFC AH Phase 3). Fatal config-load error if set.** Was: `Read` tool dir root. Replace with `volumes: default: {path: <dir>, mode: ro}` in `loomcycle.yaml`. |
+| ~~`LOOMCYCLE_WRITE_ROOT`~~ | **⚠️ RETIRED — v1.0.3+ (RFC AH Phase 3). Fatal config-load error if set.** Was: `Write`+`Edit` tool dir root. Replace with `volumes: default: {path: <dir>, mode: rw}`. |
 | `LOOMCYCLE_BASH_ENABLED` | `1` to enable `Bash`. **Not a true sandbox** — cwd-restricted, env-scrubbed (only PATH leaks), output-bounded (1 MiB), time-capped (30s default, 5min max). Containerize if exposed to untrusted prompts. |
-| `LOOMCYCLE_BASH_CWD` | Working dir Bash runs in. |
+| ~~`LOOMCYCLE_BASH_CWD`~~ | **⚠️ RETIRED — v1.0.3+ (RFC AH Phase 3). Fatal config-load error if set.** Was: Bash working dir. Now the Bash cwd is the volume root — the `path:` of the bound `rw` volume. |
 | `LOOMCYCLE_HTTP_HOST_ALLOWLIST` | `HTTP`+`WebFetch`: comma-separated **suffix-match** host allowlist (`example.com` matches `api.example.com`, not `evilexample.com`). Private IPs (RFC1918/loopback/link-local incl. 169.254.169.254) are **hard-blocked at connect** regardless. Unset = refuse all outbound. |
 | `LOOMCYCLE_HTTP_PRIVATE_HOST_ALLOWLIST` | Exception list: hosts here may resolve to private IPs at dial (e.g. a localhost app callback). Must ALSO be on the main allowlist. Only lifts the IP-private rejection. |
 | `LOOMCYCLE_HTTP_CALLER_AUTHORITATIVE` | `1` = caller's per-request `allowed_hosts` is the sole policy (operator list is a default). Unset = caller can only *narrow* the operator's static list. |

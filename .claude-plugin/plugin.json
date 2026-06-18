@@ -1,8 +1,8 @@
 {
   "name": "loomcycle",
   "displayName": "loomcycle",
-  "version": "0.32.0",
-  "description": "Drive a loomcycle agentic runtime from inside Claude Code — spawn/cancel/list runs, snapshot, evaluate, inspect memory, mint multi-tenant operator tokens, and import .claude/ repos, all via slash commands and skills over loomcycle's bundled MCP server.",
+  "version": "1.1.0",
+  "description": "Drive a loomcycle agentic runtime from inside Claude Code — spawn/cancel/list runs, snapshot, evaluate, inspect memory, mint multi-tenant operator tokens, import .claude/ repos, and configure volumes (RFC AH), all via slash commands and skills over loomcycle's bundled MCP server.",
   "author": {
     "name": "Dennis Gubsky",
     "email": "dgubsky@waverleysoftware.com",
