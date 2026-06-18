@@ -6,7 +6,9 @@ This file is loaded by Claude Code on every session in this repo. Read it cold; 
 
 **claude-code-plugin-loomcycle** is the Claude Code-side UX layer for [loomcycle](https://github.com/denn-gubsky/loomcycle), a high-load agentic runtime. It is a **Claude Code plugin** — a git-distributed bundle of slash commands, skills, hooks, and a pre-wired MCP server config. It ships nothing executable of its own: since 0.21.0 it wires `loomcycle mcp --upstream <base_url>` as a **thin client** — a stdio↔`/v1/_mcp` proxy to a running loomcycle runtime that boots NO runtime of its own (loomcycle RFC R single-runtime invariant) — and exposes its meta-tools (`mcp__loomcycle__spawn_run`, `…__cancel_run`, `…__list_runs`, snapshot ops, `…__evaluation`, `…__agentdef`, `…__volumedef`, etc.).
 
-**Current loomcycle version: v1.1.0.** RFC AH (Volume primitive) shipped across all four phases in v1.1.0. The legacy env-var jail (`LOOMCYCLE_READ_ROOT` / `WRITE_ROOT` / `BASH_CWD`) is **retired** — fatal config-load error in v1.1.0+. Use the `volumes:` block in `loomcycle.yaml` instead. See `skills/loomcycle-configure/reference/volumes.md`.
+**Current loomcycle version: v1.1.1.**
+- **RFC AH** (Volume primitive, v1.0.3+): `volumes:` block replaces the legacy jail. `LOOMCYCLE_READ_ROOT/WRITE_ROOT/BASH_CWD` are fatal config-load errors. See `skills/loomcycle-configure/reference/volumes.md`.
+- **RFC AI** (Interactive agentic sessions, v1.1.1): runs can be started with `interactive: true` — they park at `end_turn` awaiting operator steering via `POST /v1/runs/{id}/input`; re-attach via `GET /v1/runs/{id}/stream`. **No MCP tool for steering** — use `/loomcycle:steer` (HTTP). See `skills/loomcycle-configure/reference/interactive.md`.
 
 This realises RFC B of loomcycle's v1.x batch — the **UX-movement** counterpart to RFC C's **data-movement** (`loomcycle import claude-code`). C moves authoring content into loomcycle; this plugin moves *runtime control* into the IDE.
 
@@ -58,7 +60,7 @@ Distribution: users run `/plugin marketplace add denn-gubsky/claude-code-plugin-
 - Commands/skills are thin: they describe the MCP tool call and the rendering. No logic the runtime should own.
 - `spawn_run` takes `segments` (array), not a `prompt` string — wrap the operator's text as one segment. The `/v1/runs` endpoint is SSE (`text/event-stream`); the MCP thin client handles streaming transparently, but direct HTTP clients must keep the connection open for the run to proceed.
 - `list_runs` requires `user_id` — commands must supply it (from `/loomcycle-connect` state or `--user`).
-- **Versioning tracks loomcycle's vector through the v1.x batch** (not an independent plugin semver). Current version is `v1.1.0`, matching loomcycle. Bump alongside loomcycle's `v0.X.Y` / `v1.X.Y`. Keep `.claude-plugin/plugin.json` + `.claude-plugin/marketplace.json` versions in sync, and tag releases `vX.Y.Z`. `marketplace.json` keeps `ref: main` during development (installs track latest); pin it to the release tag at stable milestones.
+- **Versioning tracks loomcycle's vector through the v1.x batch** (not an independent plugin semver). Current version is `v1.1.1`, matching loomcycle. Bump alongside loomcycle's `v0.X.Y` / `v1.X.Y`. Keep `.claude-plugin/plugin.json` + `.claude-plugin/marketplace.json` versions in sync, and tag releases `vX.Y.Z`. `marketplace.json` keeps `ref: main` during development (installs track latest); pin it to the release tag at stable milestones.
 - Commit subjects ≤72 chars, imperative, conventional prefix. Close with `Co-Authored-By` when Claude wrote substantial content.
 
 ## When in doubt
