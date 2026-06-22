@@ -4,6 +4,20 @@ All notable changes to this project are documented here. The format follows
 [Keep a Changelog](https://keepachangelog.com/) and the project adheres to
 [Semantic Versioning](https://semver.org/).
 
+## [Unreleased]
+
+### Fixed
+
+- **Docs: clarify the MCP wire-up.** The 1.4.0 note "the thin client
+  auto-advertises … so `.mcp.json` needs no edit" was easy to misread as "no
+  wiring needed at all." It means an **already-registered** loomcycle MCP server
+  picks up newly-shipped tools without an edit — it is **not** a substitute for
+  registering the server the first time. README's 1.4.0 row is reworded, and a
+  new *"Wiring a project that doesn't use the plugin's server"* subsection shows
+  the thin-client `.mcp.json` shape for a project or subagent that doesn't load
+  the plugin (the bundled server only registers for plugin-enabled sessions).
+  Docs only — no version bump.
+
 ## [1.4.0] — 2026-06-22
 
 **Version-vector track to loomcycle v1.4.0** (the plugin tracked v1.1.1; this
