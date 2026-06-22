@@ -4,17 +4,108 @@ All notable changes to this project are documented here. The format follows
 [Keep a Changelog](https://keepachangelog.com/) and the project adheres to
 [Semantic Versioning](https://semver.org/).
 
-## [Unreleased]
+## [1.4.0] — 2026-06-22
+
+**Version-vector track to loomcycle v1.4.0** (the plugin tracked v1.1.1; this
+catches up through loomcycle's v1.2.0 → v1.4.0 line by documenting the three new
+primitives the operator configures + the two that are now directly callable as
+MCP meta-tools). The MCP contract change is **additive** — the thin
+`loomcycle mcp --upstream` client auto-advertises the new `path` / `document`
+meta-tools, so `.mcp.json` needs **no edit**. Version bump
+`1.1.1 → 1.4.0` (`plugin.json` + `marketplace.json`).
+
+### Added
+
+- **`reference/bashbox.md`** — the **Bashbox** primitive (RFC AJ, loomcycle
+  v1.3.0): a TRUE in-process gbash sandbox (no OS process, no network, honors
+  `ro` volumes via an in-RAM overlay), opt-in with `LOOMCYCLE_BASHBOX_ENABLED=1`
+  + `allowed_tools:[Bashbox]`. Covers `Bash` vs `Bashbox`, volume binding, the
+  operator host-command fallback (`LOOMCYCLE_BASHBOX_FALLBACK_COMMANDS` /
+  `…_ALLOWED_ENV`, off by default), and gbash coverage caveats. In-band only — no
+  MCP meta-tool.
+- **`reference/path.md`** — the **Path** VFS primitive (RFC AL, loomcycle
+  v1.4.0): the inode/dirent model, the six ops (`resolve`/`ls`/`stat`/`mkdir`/
+  `mv`/`rm`), scopes + grammar, how resources opt into a name, and the direct
+  **`mcp__loomcycle__path`** meta-tool. Gate: `allowed_tools:[Path]` (no env flag).
+- **`reference/document.md`** — the **Document** primitive (RFC AK, loomcycle
+  v1.4.0): chunked-graph documents (bodies in Memory, structure in SQL Memory),
+  the 13 ops, optimistic `revision` concurrency, atomic/orphan-free deletes, and
+  the direct **`mcp__loomcycle__document`** meta-tool. Two gates:
+  `allowed_tools:[Document]` **and** `LOOMCYCLE_SQLMEM_ENABLED=1`.
+- **`loomcycle-configure` SKILL.md** — three new primitive sections (Bashbox /
+  Path / Document) + reference-file index entries; the skill `description` now
+  triggers on Bashbox/Path/Document/SQL-Memory topics.
 
 ### Changed
 
+- **`reference/env-vars.md`** — added `LOOMCYCLE_BASHBOX_ENABLED` +
+  `LOOMCYCLE_BASHBOX_FALLBACK_COMMANDS` + `LOOMCYCLE_BASHBOX_FALLBACK_ALLOWED_ENV`
+  to the built-in tool sandboxes table, and `LOOMCYCLE_SQLMEM_ENABLED` to the
+  Memory section (the Document prerequisite).
+- **`CLAUDE.md`** — `Current loomcycle version: v1.4.0`; added RFC AA / AJ / AL /
+  AK notes.
+- **`plugin.json` / `marketplace.json`** — version `1.4.0`; `plugin.json`
+  description now mentions the Bashbox sandbox + the Path VFS + Documents.
+
+## [1.1.1] — 2026-06-18
+
+**Version-vector track to loomcycle v1.1.1** — RFC AI interactive agentic
+sessions. A run started with `interactive: true` parks at `end_turn` awaiting
+operator steering (`POST /v1/runs/{id}/input`) and is re-attachable
+(`GET /v1/runs/{id}/stream`). There is **no MCP tool for steering** — it's an
+HTTP op. Version bump `1.1.0 → 1.1.1` (`plugin.json` + `marketplace.json`).
+*(Backfilled — the bump shipped without a CHANGELOG section at the time.)*
+
+### Added
+
+- **`/loomcycle:steer`** (`commands/steer.md`) — steer a live interactive run
+  over HTTP (`POST /v1/runs/{id}/input`); the steering counterpart to `/run`.
+- **`reference/interactive.md`** — the interactive-sessions reference: the
+  `interactive: true` lifecycle (park at `end_turn` → steer → re-attach by
+  `run_id`), the steering + re-attach HTTP ops, and why steering has no MCP tool.
+
+### Changed
+
+- **`commands/run.md`** — documents the `interactive` flag for starting a
+  parked, steerable run.
+- **`CLAUDE.md`** — `Current loomcycle version: v1.1.1`; RFC AI note.
+
+## [1.1.0] — 2026-06-18
+
+**Version-vector track to loomcycle v1.1.0** (the plugin jumped v0.32.0 →
+v1.1.0). **RFC AH Volume primitive.** Phase 3 is a loomcycle **breaking change**:
+`LOOMCYCLE_READ_ROOT` / `WRITE_ROOT` / `BASH_CWD` are now fatal config-load
+errors — replaced by a `volumes:` block. Version bump `0.32.0 → 1.1.0`
+(`plugin.json` + `marketplace.json`). *(Backfilled — the bump shipped without a
+CHANGELOG section at the time.)*
+
+### Added
+
+- **`reference/volumes.md`** — the Volume primitive reference: migration table
+  from the legacy jail vars, the `volumes:` block + field reference, the
+  `VolumeDef` tool + its two gates (`volume_def_scopes` + a `dynamic_root`
+  volume), Phase 2a/2b persistent + ephemeral volumes, spawn narrowing, the
+  `defaults:` block for `loomcycle validate`, and the volume config-load errors.
+- **`loomcycle-configure` SKILL.md** — a Volume primitive section (quick
+  migration, VolumeDef gates, `defaults:` requirement) + `volumes.md` in the
+  reference index.
+
+### Changed
+
+- **`reference/env-vars.md`** — `READ_ROOT` / `WRITE_ROOT` / `BASH_CWD` marked
+  **RETIRED (v1.0.3+, fatal)** with a pointer to `volumes.md`.
+- **`reference/routing.md`** — config-load-errors table extended with the Phase 3
+  retirement error, volume-reference errors, and the `defaults:` /
+  no-provider-resolved fix.
+- **`CLAUDE.md`** — `Current loomcycle version: v1.1.0`; RFC AH retirement
+  summary; `volumedef` added to the MCP meta-tools list; SSE-streaming caveat for
+  `spawn_run`.
 - **README Troubleshooting** — added a "wrong binary / stale `bin_path` after
-  moving machines or switching OS" entry. Clarifies that the committed
-  `.mcp.json` is a placeholder template (`${user_config.*}`) resolved at install
-  time into Claude Code's own settings — so a path baked on one machine is stale
-  on another, and the fix is `/plugin` → Configure (set `bin_path=loomcycle` for
-  PATH) + restart, **not** hand-editing the live resolved `.mcp.json` (which is
-  correctly blocked as the plugin's own MCP startup config).
+  moving machines or switching OS" entry: the committed `.mcp.json` is a
+  `${user_config.*}` placeholder resolved at install time into Claude Code's own
+  settings, so a path baked on one machine is stale on another — fix via
+  `/plugin` → Configure (`bin_path=loomcycle` for PATH) + restart, **not** by
+  hand-editing the live resolved `.mcp.json`.
 
 ## [0.32.0] — 2026-06-12
 

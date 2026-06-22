@@ -58,6 +58,9 @@ never in a repo file.
 | ~~`LOOMCYCLE_READ_ROOT`~~ | **⚠️ RETIRED — v1.0.3+ (RFC AH Phase 3). Fatal config-load error if set.** Was: `Read` tool dir root. Replace with `volumes: default: {path: <dir>, mode: ro}` in `loomcycle.yaml`. |
 | ~~`LOOMCYCLE_WRITE_ROOT`~~ | **⚠️ RETIRED — v1.0.3+ (RFC AH Phase 3). Fatal config-load error if set.** Was: `Write`+`Edit` tool dir root. Replace with `volumes: default: {path: <dir>, mode: rw}`. |
 | `LOOMCYCLE_BASH_ENABLED` | `1` to enable `Bash`. **Not a true sandbox** — cwd-restricted, env-scrubbed (only PATH leaks), output-bounded (1 MiB), time-capped (30s default, 5min max). Containerize if exposed to untrusted prompts. |
+| `LOOMCYCLE_BASHBOX_ENABLED` | **(v1.3.0+, RFC AJ)** `1` to enable `Bashbox` — a **TRUE in-process gbash sandbox**: no OS process, no network, paths rooted at the bound volume. Unlike `Bash` it **honors `ro` volumes** (writes hit an in-RAM overlay). Per-agent `allowed_tools:[Bashbox]` still required. Prefer over `Bash` for untrusted/read-only work. See [bashbox.md](bashbox.md). |
+| `LOOMCYCLE_BASHBOX_FALLBACK_COMMANDS` | **(v1.3.0+, RFC AJ §13, OFF by default)** Comma-separated host commands gbash lacks (`git,gh`) that may fall through to the **real host shell** — **only** those names escape the sandbox (no smuggling); requires a `rw` volume; a loud boot `WARNING:` fires. Names only, safe in `.env.insecure`. |
+| `LOOMCYCLE_BASHBOX_FALLBACK_ALLOWED_ENV` | **(v1.3.0+)** Comma-separated env-var **names** the fallback host commands may see (`GH_TOKEN,HOME,SSH_AUTH_SOCK`) — injected into the host child **only**, never the sandbox env (model-invisible). Names here, values stay in `.env.local`. |
 | ~~`LOOMCYCLE_BASH_CWD`~~ | **⚠️ RETIRED — v1.0.3+ (RFC AH Phase 3). Fatal config-load error if set.** Was: Bash working dir. Now the Bash cwd is the volume root — the `path:` of the bound `rw` volume. |
 | `LOOMCYCLE_HTTP_HOST_ALLOWLIST` | `HTTP`+`WebFetch`: comma-separated **suffix-match** host allowlist (`example.com` matches `api.example.com`, not `evilexample.com`). Private IPs (RFC1918/loopback/link-local incl. 169.254.169.254) are **hard-blocked at connect** regardless. Unset = refuse all outbound. |
 | `LOOMCYCLE_HTTP_PRIVATE_HOST_ALLOWLIST` | Exception list: hosts here may resolve to private IPs at dial (e.g. a localhost app callback). Must ALSO be on the main allowlist. Only lifts the IP-private rejection. |
@@ -90,6 +93,7 @@ never in a repo file.
 | `LOOMCYCLE_MEMORY_MAX_VALUE_BYTES` | 65536 | Per-write value cap (set/incr). 0 disables. |
 | `LOOMCYCLE_MEMORY_MAX_SCOPE_BYTES` | 1048576 | Per-(scope,scope_id) byte cap; per-agent `memory_quota_bytes` overrides. |
 | `LOOMCYCLE_MEMORY_SWEEP_MS` | 900000 | TTL reaper cadence. Read paths filter expired rows even when off. |
+| `LOOMCYCLE_SQLMEM_ENABLED` | off | **(v1.2.0+, RFC AA)** `1` enables **SQL Memory** — a per-scope SQL database facet of the `Memory` tool (`sql_query`/`sql_exec`, gated per-agent by `sql_scopes`). **Also the prerequisite for the `Document` primitive** (RFC AK) — chunk structure lives in SQL Memory, so `Document` refuses without this flag. See [document.md](document.md). |
 
 > **`memory_scopes` is default-deny (an agent-yaml gate, not an env var).** These
 > env vars only tune limits — they do **not** grant access. An agent with

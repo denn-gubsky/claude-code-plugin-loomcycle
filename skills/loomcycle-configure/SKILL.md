@@ -1,6 +1,6 @@
 ---
 name: loomcycle-configure
-description: Configure a loomcycle runtime — providers, model tiers, user tiers, fallbacks, per-agent sampling and context-compaction, environment variables, deployment profiles (brew/in-system, containerized, true sandbox, server, multi-tenant, cloud), inbound webhooks, and third-party MCP servers. Use when the user wants to set up or tune loomcycle.yaml or its env, pick a deployment posture, wire provider routing/cost-cascades, gate plans, tune decoding (temperature/top_p) or compaction, lock down tool/sandbox/auth, receive webhooks, or connect external MCP tools.
+description: Configure a loomcycle runtime — providers, model tiers, user tiers, fallbacks, per-agent sampling and context-compaction, environment variables, deployment profiles (brew/in-system, containerized, true sandbox, server, multi-tenant, cloud), filesystem Volumes, the Bashbox in-process sandbox, the Path VFS, chunked-graph Documents, inbound webhooks, and third-party MCP servers. Use when the user wants to set up or tune loomcycle.yaml or its env, pick a deployment posture, wire provider routing/cost-cascades, gate plans, tune decoding (temperature/top_p) or compaction, lock down tool/sandbox/auth, enable or choose between Bash and the Bashbox sandbox (incl. its host-command fallback), name resources with Path, author chunked-graph Documents (and the SQL Memory they require), receive webhooks, or connect external MCP tools.
 allowed-tools: Read Write Edit Bash(loomcycle validate*) Bash(loomcycle doctor*) Bash(loomcycle init*)
 ---
 
@@ -145,6 +145,41 @@ config so `validate` works without a live provider environment.
 **Full reference:** [reference/volumes.md](reference/volumes.md) — migration table, field reference,
 VolumeDef op catalogue, spawn narrowing, validation errors.
 
+## Bashbox — a TRUE in-process sandbox (RFC AJ) — v1.3.0+
+
+`Bashbox` is the **isolated** alternative to `Bash`: it runs commands in-process via gbash
+(pure-Go) — **no OS process, no network**, every path rooted at the bound volume. Because the
+isolation is real it **honors read-only volumes** (a `ro` binding mounts under an in-RAM overlay —
+writes succeed in-run but never touch the host; `Bash` refuses `ro`). Opt-in like Bash:
+`LOOMCYCLE_BASHBOX_ENABLED=1` + `allowed_tools:[Bashbox]`. **Prefer Bashbox over Bash for untrusted
+prompts or read-only work;** use `Bash` only when an agent needs a real host binary (in a contained
+deployment). An operator can allowlist specific host commands gbash lacks (`git`, `gh`) to fall
+through to the host shell via `LOOMCYCLE_BASHBOX_FALLBACK_COMMANDS` (off by default; only those names
+escape; rw-only; creds via `LOOMCYCLE_BASHBOX_FALLBACK_ALLOWED_ENV` injected into the host child
+only). Bashbox is **in-band only** — there is no `mcp__loomcycle__bashbox` meta-tool.
+**Full reference:** [reference/bashbox.md](reference/bashbox.md).
+
+## Path — a Unix-like VFS (RFC AL) — v1.4.0+
+
+`Path` names Memory entries / Volume mounts / Documents by human-readable paths (`/docs/launch`)
+over a `dirents` inode/dirent table. Six ops (`resolve`/`ls`/`stat`/`mkdir`(no-op)/`mv`/`rm`),
+scope-aware (`agent`/`user`/`tenant`), `..` rejected, tenant-isolated. **Gate: `allowed_tools:
+[Path]`** — no env flag, no separate scope policy (a dirent is a name, not an authority grant).
+Resources opt into a name via `Memory.set path:` / `VolumeDef.create mount_at:` /
+`Document.create_document path:`. **Also a direct MCP meta-tool** — call `mcp__loomcycle__path`
+from the plugin without spawning a run (scope + tenant resolved server-side from the principal).
+**Full reference:** [reference/path.md](reference/path.md).
+
+## Document — chunked-graph documents (RFC AK) — v1.4.0+
+
+`Document` is a tree of **chunks** (UUID, hierarchy, type, fields, edges, Markdown body) that agents
+and humans co-author. Bodies live in Memory; structure lives in **SQL Memory** (queryable). 13 ops
+(document/chunk lifecycle, edges, `query_chunks`, type defs), optimistic `revision` concurrency,
+atomic + orphan-free deletes. **Two gates: `allowed_tools:[Document]` AND
+`LOOMCYCLE_SQLMEM_ENABLED=1`** (the structure tables live in SQL Memory — the #1 "Document refused"
+cause). Scope `agent`/`user` (tenant deferred). **Also a direct MCP meta-tool** —
+`mcp__loomcycle__document`. **Full reference:** [reference/document.md](reference/document.md).
+
 ## Reference files (read on demand)
 
 - **[reference/routing.md](reference/routing.md)** — providers + API-key env
@@ -158,6 +193,20 @@ VolumeDef op catalogue, spawn narrowing, validation errors.
   ephemeral volumes, spawn narrowing, migration from legacy jail vars, validation
   errors. Read this for any file-tool sandboxing, `VolumeDef`, or Phase 3
   migration question.
+- **[reference/bashbox.md](reference/bashbox.md)** — Bashbox (RFC AJ, v1.3.0+):
+  the true in-process gbash sandbox vs `Bash`, enablement
+  (`LOOMCYCLE_BASHBOX_ENABLED` + `allowed_tools`), how it honors `ro` volumes, the
+  operator host-command fallback (`LOOMCYCLE_BASHBOX_FALLBACK_*`), and gbash
+  coverage caveats. Read this for any sandboxed-shell or `Bash`-vs-`Bashbox` question.
+- **[reference/path.md](reference/path.md)** — Path primitive (RFC AL, v1.4.0+):
+  the dirent model, the six ops, scopes + grammar, how resources opt into a name,
+  the direct `mcp__loomcycle__path` meta-tool, and v1 caveats. Read this for any
+  resource-naming / VFS question.
+- **[reference/document.md](reference/document.md)** — Document primitive (RFC AK,
+  v1.4.0+): chunked-graph documents, the content/structure split, the 13 ops, the
+  **`LOOMCYCLE_SQLMEM_ENABLED` prerequisite**, optimistic concurrency, atomic
+  deletes, and the direct `mcp__loomcycle__document` meta-tool. Read this for any
+  chunked-document / co-authoring question.
 - **[reference/profiles.md](reference/profiles.md)** — the six deployment
   profiles in full: trust posture, exact env set, yaml skeleton, and sharp
   edges per profile.
