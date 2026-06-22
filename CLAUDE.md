@@ -6,9 +6,13 @@ This file is loaded by Claude Code on every session in this repo. Read it cold; 
 
 **claude-code-plugin-loomcycle** is the Claude Code-side UX layer for [loomcycle](https://github.com/denn-gubsky/loomcycle), a high-load agentic runtime. It is a **Claude Code plugin** — a git-distributed bundle of slash commands, skills, hooks, and a pre-wired MCP server config. It ships nothing executable of its own: since 0.21.0 it wires `loomcycle mcp --upstream <base_url>` as a **thin client** — a stdio↔`/v1/_mcp` proxy to a running loomcycle runtime that boots NO runtime of its own (loomcycle RFC R single-runtime invariant) — and exposes its meta-tools (`mcp__loomcycle__spawn_run`, `…__cancel_run`, `…__list_runs`, snapshot ops, `…__evaluation`, `…__agentdef`, `…__volumedef`, etc.).
 
-**Current loomcycle version: v1.1.1.**
+**Current loomcycle version: v1.4.0.**
 - **RFC AH** (Volume primitive, v1.0.3+): `volumes:` block replaces the legacy jail. `LOOMCYCLE_READ_ROOT/WRITE_ROOT/BASH_CWD` are fatal config-load errors. See `skills/loomcycle-configure/reference/volumes.md`.
 - **RFC AI** (Interactive agentic sessions, v1.1.1): runs can be started with `interactive: true` — they park at `end_turn` awaiting operator steering via `POST /v1/runs/{id}/input`; re-attach via `GET /v1/runs/{id}/stream`. **No MCP tool for steering** — use `/loomcycle:steer` (HTTP). See `skills/loomcycle-configure/reference/interactive.md`.
+- **RFC AA** (SQL Memory, v1.2.0): a per-scope SQL database facet of the `Memory` tool, enabled by `LOOMCYCLE_SQLMEM_ENABLED=1`. The **prerequisite for Documents** (RFC AK stores chunk structure there). Noted in `reference/env-vars.md` + `reference/document.md`.
+- **RFC AJ** (Bashbox, v1.3.0): `Bashbox` — a TRUE in-process gbash sandbox (no OS process, no network, honors `ro` volumes), opt-in via `LOOMCYCLE_BASHBOX_ENABLED=1` + `allowed_tools:[Bashbox]`, with an operator host-command fallback. **In-band only — no MCP meta-tool.** See `reference/bashbox.md`.
+- **RFC AL** (Path VFS, v1.4.0): name Memory/Volume/Document resources by paths over a `dirents` table; `allowed_tools:[Path]`. **Direct MCP meta-tool `mcp__loomcycle__path`.** See `reference/path.md`.
+- **RFC AK** (Document, v1.4.0): chunked-graph documents (bodies in Memory, structure in SQL Memory); `allowed_tools:[Document]` + `LOOMCYCLE_SQLMEM_ENABLED=1`. **Direct MCP meta-tool `mcp__loomcycle__document`.** See `reference/document.md`.
 
 This realises RFC B of loomcycle's v1.x batch — the **UX-movement** counterpart to RFC C's **data-movement** (`loomcycle import claude-code`). C moves authoring content into loomcycle; this plugin moves *runtime control* into the IDE.
 
