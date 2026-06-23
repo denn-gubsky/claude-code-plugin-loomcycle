@@ -72,6 +72,25 @@ For `--scopes`, pass the **narrowest** set: a per-app key might be
 `runs:create`; only an admin/operator key needs `substrate:admin`. Default-deny
 — omitted scopes are not granted.
 
+## Static alternative — declared principals (RFC AO)
+
+Minting is the **runtime** way to create a per-principal token. For a **stable
+service identity** you don't want to mint and rotate at runtime, loomcycle RFC AO
+lets the operator **declare** one in `loomcycle.yaml` instead:
+
+```yaml
+principals:
+  marketing: { tenant: acme, subject: marketing, scopes: [runs:create, runs:read, substrate:tenant], token_env: LOOMCYCLE_TOKEN_MARKETING }
+```
+
+The secret lives in `.env.local` (`LOOMCYCLE_TOKEN_MARKETING=lct_…`); the same
+token works for the plugin's `auth_token` **and** the Web UI login, so both act
+as one `(tenant, subject)` identity. Resolution order is minted token → declared
+principal → legacy. This is **not** an `operatortokendef` op — it is operator
+config; suggest it when the user wants a fixed plugin/UI login rather than a
+runtime-minted, rotatable token. See the README *"Tenant & declared-principal
+tokens"* section and `examples/README.md`.
+
 ## Scope note — depends on the transport
 
 `operatortokendef` is operator-admin-only. Since 0.21.0 the default stdio

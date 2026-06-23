@@ -4,6 +4,47 @@ All notable changes to this project are documented here. The format follows
 [Keep a Changelog](https://keepachangelog.com/) and the project adheres to
 [Semantic Versioning](https://semver.org/).
 
+## [1.5.0] — 2026-06-23
+
+**Auth: the plugin's `auth_token` is now a first-class tenant identity** —
+tracking loomcycle `main` (RFC AG per-principal `/v1/_mcp` + RFC AO
+config-declared principals, PRs #549–#555), **pending the next loomcycle tag**.
+No new MCP meta-tools — this is an auth/route change. Version bump `1.4.0 →
+1.5.0` (`plugin.json` + `marketplace.json`).
+
+### Changed
+
+- **A `substrate:tenant` (or config-declared-principal) `auth_token` now drives
+  the plugin (RFC AG).** loomcycle's `/v1/_mcp` route moved
+  `substrate:admin → substrate:tenant`: previously the MCP transport ran as a
+  global operator and the route required admin, so a tenant `lct_…` bearer was
+  refused at the door; now it **opens the session** confined to its tenant. A
+  per-tool gate withholds the admin-only meta-tools, so with a tenant token the
+  run / fanout / runs / cancel / compact / memory / eval / steer commands work
+  (tenant-confined) while **`/loomcycle:operator-token` and `/loomcycle:snapshot`
+  require an admin token** (a refusal there is expected, not a bug).
+- **README** — new *"Tenant & declared-principal tokens (RFC AG + AO)"*
+  subsection; the `snapshot` command row + `auth_token` userConfig description
+  now flag the admin-only / tenant-confinement behavior; a `1.5.0` compatibility
+  row grounded against loomcycle `main` with the build-requirement caveat.
+
+### Added
+
+- **Declared-principal one-token pattern (RFC AO).** Documented in the README,
+  `examples/README.md`, and `commands/operator-token.md`: declare a stable
+  `(tenant, subject)` login in `loomcycle.yaml` (`principals:` block, secret in
+  `.env.local` via `token_env`) and use the **same** token for both the loomcycle
+  Web UI login and the plugin's `auth_token`, so a plugin-driven agent and the UI
+  act as one identity — its user-scoped Memory/Documents/Paths line up by
+  construction. A static alternative to runtime `operator-token` minting.
+
+### Compatibility
+
+- ⚠️ **Requires a loomcycle build with the RFC AG route flip** for a tenant /
+  declared-principal token to open `/v1/_mcp`. On an older build the route is
+  still `substrate:admin` and a tenant token 403s — use an admin `auth_token`
+  (the plugin's prior behavior, unchanged) or upgrade loomcycle.
+
 ## [1.4.0] — 2026-06-22
 
 **Version-vector track to loomcycle v1.4.0** (the plugin tracked v1.1.1; this
