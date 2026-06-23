@@ -68,6 +68,28 @@ own** — no providers, scheduler, sweepers, or port to bind.
 > separately via `loomcycle`/`brew services`/Docker); the plugin no longer
 > starts one. Requires a loomcycle build that supports `loomcycle mcp --upstream`.
 
+### Wiring a project that doesn't use the plugin's server
+
+The bundled `.mcp.json` registers the loomcycle server **only for sessions where
+this plugin is enabled**. If a project doesn't load the plugin (or a subagent
+that doesn't inherit it needs the tools), `mcp__loomcycle__path` /
+`mcp__loomcycle__document` / … won't appear until **that project has its own
+loomcycle server entry**. Add a `.mcp.json` at the project root pointing at the
+same thin client:
+
+```json
+{ "mcpServers": { "loomcycle": { "command": "/abs/path/to/loomcycle-mcp-upstream.sh" } } }
+```
+
+where the wrapper sources your env (for the bearer) then
+`exec loomcycle mcp --upstream http://127.0.0.1:8787` — so the runtime is shared
+(one store) and the token stays out of the file. (Inline form:
+`"command": "loomcycle", "args": ["mcp","--upstream","<base_url>"], "env": {"LOOMCYCLE_MCP_UPSTREAM_TOKEN": "…"}` — but that puts the bearer in the file; prefer the wrapper.) Then restart.
+
+The "auto-advertise — no `.mcp.json` edit" note in the version table below is
+about an **already-registered** server picking up newly-shipped tools; it is
+**not** a substitute for registering the server the first time.
+
 ## Update
 
 The marketplace tracks `main`, so updating is two steps — **refresh the
