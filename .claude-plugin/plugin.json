@@ -20,12 +20,6 @@
       "description": "Path to the loomcycle binary. Leave as 'loomcycle' to use PATH lookup.",
       "default": "loomcycle"
     },
-    "config_path": {
-      "type": "string",
-      "title": "loomcycle.yaml path (legacy)",
-      "description": "Reserved. The plugin runs as a thin client (--upstream) and no longer loads a config itself — the running runtime owns the config. Kept for compatibility / embedded fallback.",
-      "default": "loomcycle.yaml"
-    },
     "auth_token": {
       "type": "string",
       "title": "loomcycle bearer token",

@@ -50,7 +50,6 @@ At install you'll be prompted for:
 | `bin_path` | Path to the loomcycle binary | `loomcycle` (PATH lookup) |
 | `base_url` | **Upstream runtime URL** the plugin proxies to — a loomcycle instance must be running here | `http://127.0.0.1:8787` |
 | `auth_token` | Bearer sent to the upstream (as `LOOMCYCLE_MCP_UPSTREAM_TOKEN`); its principal governs what the plugin can do. OS keychain, **never** the repo | — |
-| `config_path` | *Legacy / reserved* — the thin client loads no config of its own | `loomcycle.yaml` |
 
 The bundled MCP server entry (`.mcp.json`) launches
 `loomcycle mcp --upstream <base_url>` automatically when the plugin is enabled.
@@ -233,11 +232,13 @@ it's a feature request on the loomcycle repo — the plugin ships no workarounds
 
 ## Troubleshooting
 
-- **MCP server won't connect** — check `loomcycle` is on PATH (or `bin_path` is
-  correct) and that `config_path` points at a valid `loomcycle.yaml`. Claude
-  Code spawns MCP servers with a sparse environment; if your yaml uses
-  `${...}` env placeholders, populate them or wrap the binary in a script that
-  sources your env first.
+- **MCP server won't connect** — the plugin is a thin client, so check two
+  things: (1) the `loomcycle` binary is on PATH (or `bin_path` is correct), and
+  (2) a loomcycle runtime is actually **running and reachable at `base_url`** —
+  the plugin boots no runtime of its own, it proxies to one. If the upstream
+  requires a bearer, confirm `auth_token` is set (sent as
+  `LOOMCYCLE_MCP_UPSTREAM_TOKEN`). The upstream runtime owns its own
+  `loomcycle.yaml` + env — the thin client loads none.
 - **Wrong binary / "command not found" after moving machines or switching OS**
   (e.g. a Linux `bin_path` carried onto macOS) — the committed `.mcp.json` is a
   *template* (`${user_config.bin_path}` / `${user_config.base_url}`); Claude Code
