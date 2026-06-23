@@ -68,6 +68,28 @@ own** — no providers, scheduler, sweepers, or port to bind.
 > separately via `loomcycle`/`brew services`/Docker); the plugin no longer
 > starts one. Requires a loomcycle build that supports `loomcycle mcp --upstream`.
 
+### Wiring a project that doesn't use the plugin's server
+
+The bundled `.mcp.json` registers the loomcycle server **only for sessions where
+this plugin is enabled**. If a project doesn't load the plugin (or a subagent
+that doesn't inherit it needs the tools), `mcp__loomcycle__path` /
+`mcp__loomcycle__document` / … won't appear until **that project has its own
+loomcycle server entry**. Add a `.mcp.json` at the project root pointing at the
+same thin client:
+
+```json
+{ "mcpServers": { "loomcycle": { "command": "/abs/path/to/loomcycle-mcp-upstream.sh" } } }
+```
+
+where the wrapper sources your env (for the bearer) then
+`exec loomcycle mcp --upstream http://127.0.0.1:8787` — so the runtime is shared
+(one store) and the token stays out of the file. (Inline form:
+`"command": "loomcycle", "args": ["mcp","--upstream","<base_url>"], "env": {"LOOMCYCLE_MCP_UPSTREAM_TOKEN": "…"}` — but that puts the bearer in the file; prefer the wrapper.) Then restart.
+
+The "auto-advertise — no `.mcp.json` edit" note in the version table below is
+about an **already-registered** server picking up newly-shipped tools; it is
+**not** a substitute for registering the server the first time.
+
 ## Update
 
 The marketplace tracks `main`, so updating is two steps — **refresh the
@@ -189,7 +211,7 @@ claude plugin validate ./claude-code-plugin-loomcycle   # validate before publis
 
 | This plugin | loomcycle | Claude Code |
 |---|---|---|
-| 1.4.0 | Same runtime requirement as 0.21.0 (`loomcycle mcp --upstream` thin client; an instance running at `base_url`). Version-vector track through loomcycle's **v1.2.0 → v1.4.0** line, grounded against source at the **v1.4.0 tag**. **MCP contract is additive — adds the `path` (RFC AL) + `document` (RFC AK) meta-tools** (the thin client auto-advertises them, so `.mcp.json` needs no edit). Skill grounding adds the three new primitives an operator configures: **Bashbox** (RFC AJ, v1.3.0 — `LOOMCYCLE_BASHBOX_ENABLED` + the host-command fallback), **Path** (RFC AL — `allowed_tools:[Path]`), and **Documents** (RFC AK — `allowed_tools:[Document]` + `LOOMCYCLE_SQLMEM_ENABLED`, the SQL Memory prerequisite, RFC AA v1.2.0). Thin-client `--upstream` wiring unchanged. | ≥ 2.1 |
+| 1.4.0 | Same runtime requirement as 0.21.0 (`loomcycle mcp --upstream` thin client; an instance running at `base_url`). Version-vector track through loomcycle's **v1.2.0 → v1.4.0** line, grounded against source at the **v1.4.0 tag**. **MCP contract is additive — adds the `path` (RFC AL) + `document` (RFC AK) meta-tools** (the thin client auto-advertises them, so an **already-wired** loomcycle MCP server needs no `.mcp.json` edit — see *Wiring a project that doesn't use the plugin's server* under Setup if loomcycle isn't registered there yet). Skill grounding adds the three new primitives an operator configures: **Bashbox** (RFC AJ, v1.3.0 — `LOOMCYCLE_BASHBOX_ENABLED` + the host-command fallback), **Path** (RFC AL — `allowed_tools:[Path]`), and **Documents** (RFC AK — `allowed_tools:[Document]` + `LOOMCYCLE_SQLMEM_ENABLED`, the SQL Memory prerequisite, RFC AA v1.2.0). Thin-client `--upstream` wiring unchanged. | ≥ 2.1 |
 | 1.1.1 | Same runtime requirement as 0.21.0 (`loomcycle mcp --upstream` thin client; an instance running at `base_url`). Tracks loomcycle **v1.1.1** — **RFC AI interactive agentic sessions**: a run with `interactive: true` parks at `end_turn` for operator steering (`POST /v1/runs/{id}/input`) and is re-attachable (`GET /v1/runs/{id}/stream`). Adds `/loomcycle:steer` (HTTP — there is **no MCP steering tool**) + `reference/interactive.md`; `/loomcycle:run` documents the `interactive` flag. MCP tool contract unchanged. *(Documented retroactively in the 1.4.0 changelog backfill.)* | ≥ 2.1 |
 | 1.1.0 | Same runtime requirement as 0.21.0. Tracks loomcycle **v1.1.0** (plugin jumped v0.32.0 → v1.1.0) — the **RFC AH Volume primitive**. ⚠️ loomcycle **breaking change**: `LOOMCYCLE_READ_ROOT` / `WRITE_ROOT` / `BASH_CWD` are fatal config-load errors, replaced by a `volumes:` block. Adds `reference/volumes.md` (migration, `volumes:` fields, `VolumeDef` + gates, ephemeral volumes, spawn narrowing) + the Volume section in `loomcycle-configure`; the `volumedef` meta-tool is now documented. *(Documented retroactively in the 1.4.0 changelog backfill.)* | ≥ 2.1 |
 | 0.32.0 | Same runtime requirement as 0.21.0 (`loomcycle mcp --upstream` thin client; an instance running at `base_url`). Re-grounded against loomcycle source at the **v0.32.0 tag** (loomcycle shipped v0.25.1 → v0.32.0). **MCP contract grew 40 → 42 tools** (both additive): `spawn_runs` (RFC Y external fan-out, ≤32 runs/call → `/loomcycle:fanout`) and `compact_run` (summarize a parked run → `/loomcycle:compact`); `spawn_run` gained an optional `compaction` field (→ `/loomcycle:run --compact`). Skill grounding adds the per-agent `sampling:` (v0.28.0) + `compaction:` (v0.32.0) blocks, `LOOMCYCLE_RESUME_FANOUT` (v0.31.0), and the corrected `${}` deny-list (`PG_DSN`/`LOOMCYCLE_PG_DSN`/`LOOMCYCLE_AUTH_TOKEN` never interpolated, v0.32.0/#462). Thin-client `--upstream` wiring unchanged. | ≥ 2.1 |

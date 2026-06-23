@@ -6,25 +6,17 @@ All notable changes to this project are documented here. The format follows
 
 ## [Unreleased]
 
-### Removed
+### Fixed
 
-- **`config_path` userConfig option** — dropped from `.claude-plugin/plugin.json`.
-  It was self-titled "(legacy)" and reserved: since the plugin became a thin
-  client (`mcp --upstream`, v0.21.0) it **loads no config of its own**, and
-  `.mcp.json` never referenced it — the running upstream runtime owns its
-  `loomcycle.yaml`. The field was a functional no-op; removing it leaves only the
-  three live options (`bin_path`, `base_url`, `auth_token`).
-
-### Changed
-
-- **README** — removed the `config_path` row from the userConfig table, and
-  rewrote the "MCP server won't connect" troubleshooting bullet, which gave
-  stale advice ("check `config_path` points at a valid `loomcycle.yaml`"). The
-  thin client reads no yaml; the bullet now points at the real failure modes
-  (binary on PATH/`bin_path`, an upstream reachable at `base_url`, `auth_token`).
-
-Plugin version is unchanged (stays `1.4.0`, matching loomcycle) — this is a
-plugin-only config cleanup, not a loomcycle-version track.
+- **Docs: clarify the MCP wire-up.** The 1.4.0 note "the thin client
+  auto-advertises … so `.mcp.json` needs no edit" was easy to misread as "no
+  wiring needed at all." It means an **already-registered** loomcycle MCP server
+  picks up newly-shipped tools without an edit — it is **not** a substitute for
+  registering the server the first time. README's 1.4.0 row is reworded, and a
+  new *"Wiring a project that doesn't use the plugin's server"* subsection shows
+  the thin-client `.mcp.json` shape for a project or subagent that doesn't load
+  the plugin (the bundled server only registers for plugin-enabled sessions).
+  Docs only — no version bump.
 
 ## [1.4.0] — 2026-06-22
 
