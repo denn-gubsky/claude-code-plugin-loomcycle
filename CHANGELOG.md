@@ -9,8 +9,9 @@ All notable changes to this project are documented here. The format follows
 **Auth: the plugin's `auth_token` is now a first-class tenant identity** —
 tracking loomcycle `main` (RFC AG per-principal `/v1/_mcp` + RFC AO
 config-declared principals, PRs #549–#555), **pending the next loomcycle tag**.
-No new MCP meta-tools — this is an auth/route change. Version bump `1.4.0 →
-1.5.0` (`plugin.json` + `marketplace.json`).
+No new MCP meta-tools — this is an auth/route change. Also retires the legacy
+`config_path` userConfig (#18). Version bump `1.4.0 → 1.5.0` (`plugin.json` +
+`marketplace.json`).
 
 ### Changed
 
@@ -27,6 +28,11 @@ No new MCP meta-tools — this is an auth/route change. Version bump `1.4.0 →
   subsection; the `snapshot` command row + `auth_token` userConfig description
   now flag the admin-only / tenant-confinement behavior; a `1.5.0` compatibility
   row grounded against loomcycle `main` with the build-requirement caveat.
+- **README troubleshooting** (#18) — rewrote the "MCP server won't connect"
+  bullet, which gave stale advice ("check `config_path` points at a valid
+  `loomcycle.yaml`"). The thin client reads no yaml; the bullet now points at the
+  real failure modes (binary on PATH/`bin_path`, an upstream reachable at
+  `base_url`, `auth_token`).
 
 ### Added
 
@@ -37,6 +43,16 @@ No new MCP meta-tools — this is an auth/route change. Version bump `1.4.0 →
   Web UI login and the plugin's `auth_token`, so a plugin-driven agent and the UI
   act as one identity — its user-scoped Memory/Documents/Paths line up by
   construction. A static alternative to runtime `operator-token` minting.
+
+### Removed
+
+- **`config_path` userConfig option** (#18) — dropped from
+  `.claude-plugin/plugin.json` + the README userConfig table. It was self-titled
+  "(legacy)" and reserved: since the plugin became a thin client
+  (`mcp --upstream`, v0.21.0) it **loads no config of its own**, and `.mcp.json`
+  never referenced it — the running upstream runtime owns its `loomcycle.yaml`.
+  The field was a functional no-op; removing it leaves only the three live
+  options (`bin_path`, `base_url`, `auth_token`).
 
 ### Compatibility
 
