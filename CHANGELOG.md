@@ -4,19 +4,62 @@ All notable changes to this project are documented here. The format follows
 [Keep a Changelog](https://keepachangelog.com/) and the project adheres to
 [Semantic Versioning](https://semver.org/).
 
-## [Unreleased]
+## [1.5.0] — 2026-06-23
 
-### Fixed
+**Auth: the plugin's `auth_token` is now a first-class tenant identity** —
+tracking loomcycle `main` (RFC AG per-principal `/v1/_mcp` + RFC AO
+config-declared principals, PRs #549–#555), **pending the next loomcycle tag**.
+No new MCP meta-tools — this is an auth/route change. Also retires the legacy
+`config_path` userConfig (#18). Version bump `1.4.0 → 1.5.0` (`plugin.json` +
+`marketplace.json`).
 
-- **Docs: clarify the MCP wire-up.** The 1.4.0 note "the thin client
-  auto-advertises … so `.mcp.json` needs no edit" was easy to misread as "no
-  wiring needed at all." It means an **already-registered** loomcycle MCP server
-  picks up newly-shipped tools without an edit — it is **not** a substitute for
-  registering the server the first time. README's 1.4.0 row is reworded, and a
-  new *"Wiring a project that doesn't use the plugin's server"* subsection shows
-  the thin-client `.mcp.json` shape for a project or subagent that doesn't load
-  the plugin (the bundled server only registers for plugin-enabled sessions).
-  Docs only — no version bump.
+### Changed
+
+- **A `substrate:tenant` (or config-declared-principal) `auth_token` now drives
+  the plugin (RFC AG).** loomcycle's `/v1/_mcp` route moved
+  `substrate:admin → substrate:tenant`: previously the MCP transport ran as a
+  global operator and the route required admin, so a tenant `lct_…` bearer was
+  refused at the door; now it **opens the session** confined to its tenant. A
+  per-tool gate withholds the admin-only meta-tools, so with a tenant token the
+  run / fanout / runs / cancel / compact / memory / eval / steer commands work
+  (tenant-confined) while **`/loomcycle:operator-token` and `/loomcycle:snapshot`
+  require an admin token** (a refusal there is expected, not a bug).
+- **README** — new *"Tenant & declared-principal tokens (RFC AG + AO)"*
+  subsection; the `snapshot` command row + `auth_token` userConfig description
+  now flag the admin-only / tenant-confinement behavior; a `1.5.0` compatibility
+  row grounded against loomcycle `main` with the build-requirement caveat.
+- **README troubleshooting** (#18) — rewrote the "MCP server won't connect"
+  bullet, which gave stale advice ("check `config_path` points at a valid
+  `loomcycle.yaml`"). The thin client reads no yaml; the bullet now points at the
+  real failure modes (binary on PATH/`bin_path`, an upstream reachable at
+  `base_url`, `auth_token`).
+
+### Added
+
+- **Declared-principal one-token pattern (RFC AO).** Documented in the README,
+  `examples/README.md`, and `commands/operator-token.md`: declare a stable
+  `(tenant, subject)` login in `loomcycle.yaml` (`principals:` block, secret in
+  `.env.local` via `token_env`) and use the **same** token for both the loomcycle
+  Web UI login and the plugin's `auth_token`, so a plugin-driven agent and the UI
+  act as one identity — its user-scoped Memory/Documents/Paths line up by
+  construction. A static alternative to runtime `operator-token` minting.
+
+### Removed
+
+- **`config_path` userConfig option** (#18) — dropped from
+  `.claude-plugin/plugin.json` + the README userConfig table. It was self-titled
+  "(legacy)" and reserved: since the plugin became a thin client
+  (`mcp --upstream`, v0.21.0) it **loads no config of its own**, and `.mcp.json`
+  never referenced it — the running upstream runtime owns its `loomcycle.yaml`.
+  The field was a functional no-op; removing it leaves only the three live
+  options (`bin_path`, `base_url`, `auth_token`).
+
+### Compatibility
+
+- ⚠️ **Requires a loomcycle build with the RFC AG route flip** for a tenant /
+  declared-principal token to open `/v1/_mcp`. On an older build the route is
+  still `substrate:admin` and a tenant token 403s — use an admin `auth_token`
+  (the plugin's prior behavior, unchanged) or upgrade loomcycle.
 
 ## [1.4.0] — 2026-06-22
 

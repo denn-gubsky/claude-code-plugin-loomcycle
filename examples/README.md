@@ -31,3 +31,38 @@ under-scoped calls get a `scope` refusal. Do **not** define both a stdio and an
 HTTP `loomcycle` server: a second server name (e.g. `loomcycle-http`) would not
 back the `mcp__loomcycle__*` commands, and two servers named `loomcycle` is
 invalid. It is a swap, not an addition.
+
+> **Requires the RFC AG route flip.** A `substrate:tenant` token only opens
+> `/v1/_mcp` on a loomcycle build where the route is `substrate:tenant` (RFC AG,
+> post-v1.4.0). On an older build the route is still `substrate:admin` and a
+> tenant token 403s — use an admin token or upgrade loomcycle.
+
+## Declared-principal token (RFC AO) — one token for the UI *and* the plugin
+
+You don't have to **mint** an `OperatorTokenDef` to get a confined token. With
+loomcycle RFC AO you can **declare** a stable login in `loomcycle.yaml` and bind
+it to a secret in `.env.local`:
+
+```yaml
+# loomcycle.yaml
+principals:
+  acme-ide:
+    tenant: acme
+    subject: ide
+    scopes: [runs:create, runs:read, substrate:tenant]
+    token_env: LOOMCYCLE_TOKEN_ACME_IDE     # the SECRET lives in .env.local
+```
+```sh
+# .env.local
+LOOMCYCLE_TOKEN_ACME_IDE=lct_…
+```
+
+Put that one token in **both** the plugin's `auth_token` userConfig **and** the
+loomcycle Web UI login (`/ui/login`). Both resolve to the same `(acme, ide)`
+principal, so a plugin-driven agent's user-scoped Memory / Documents / Paths show
+up under the identity the Web UI reads — the marketing-agent ↔ UI mismatch
+disappears by construction. This is a **static** alternative to runtime
+`/loomcycle:operator-token create`; the resolution order is minted token →
+declared principal → legacy `LOOMCYCLE_AUTH_TOKEN`. (No `.mcp.json` change — only
+the *source* of the token differs. Works on the default stdio thin client and the
+HTTP transport above alike.)

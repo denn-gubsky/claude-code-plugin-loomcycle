@@ -131,7 +131,7 @@ All commands are namespaced under the plugin name: `/loomcycle:<command>`.
 | `/loomcycle:compact <agent_id> [--reason=<text>]` | `compact_run` | Summarize a **parked** run's history to free context, then continue (≥ v0.32). |
 | `/loomcycle:runs [--user=<id>] [--status=<s>] [--limit=<n>]` | `list_runs` | List recent runs as a table. `user_id` is required (set it once via connect). |
 | `/loomcycle:cancel <agent_id> [--reason=<text>]` | `cancel_run` | Cancel a running agent; cascades to sub-agents; idempotent. |
-| `/loomcycle:snapshot <create\|list\|restore\|delete> [id]` | the 4 snapshot tools | Runtime snapshot ops from the IDE. Restore/delete confirm first. |
+| `/loomcycle:snapshot <create\|list\|restore\|delete> [id]` | the 4 snapshot tools | Runtime snapshot ops from the IDE. Restore/delete confirm first. **Admin token only** — runtime-global, withheld from a `substrate:tenant` session (RFC AG). |
 | `/loomcycle:eval <run_id> <score> [--rationale=<text>]` | `evaluation` (`op=submit`) | Record an evaluation against a completed run. loomcycle never auto-promotes on score. |
 | `/loomcycle:memory <recall\|search\|add\|get\|set\|list> [--scope=agent\|user] [args…]` | `memory` | Inspect/edit an agent's memory: semantic `recall`/`search`, `add` conversation facts, or plain key/value. `add`/`recall` need a memory-layer backend (v0.16). |
 | `/loomcycle:operator-token <create\|rotate\|retire\|get\|list> [--name=<n>] [--tenant=<id>] [--subject=<s>] [--scopes=a,b]` | `operatortokendef` | Mint/rotate/retire per-principal bearer tokens (RFC L multi-tenant auth, loomcycle ≥ v0.17). Operator-admin only; create/rotate show the plaintext **once**. |
@@ -180,6 +180,41 @@ the default already routes through the principal-enforced `/v1/_mcp`. (The
 [HTTP example](examples/mcp-http-tenant.json) remains a valid alternative
 transport if you'd rather not run the stdio proxy process.)
 
+### Tenant & declared-principal tokens (loomcycle RFC AG + AO)
+
+A recent loomcycle line (RFC AG + AO, post-v1.4.0) makes the `auth_token` you
+hand the plugin a **first-class tenant identity**, not just an admin key:
+
+- **`/v1/_mcp` is now a `substrate:tenant` route (RFC AG).** Earlier the
+  loomcycle MCP transport ran as a *global operator* and the route required
+  `substrate:admin`, so a tenant `lct_…` bearer was refused at the door — the
+  plugin effectively needed an admin token. Now a `substrate:tenant` token
+  **opens the session** and everything inside is confined to its tenant. (On an
+  older loomcycle build without the flip, a tenant token still 403s at the
+  route — see the Compatibility note.)
+- **A per-tool gate withholds the admin-only meta-tools.** Inside a
+  `substrate:tenant` session, the runtime-global / minting tools are hidden from
+  `tools/list` and refused on `tools/call`. Concretely, with a tenant token:
+  - ✅ **work, tenant-confined:** `/loomcycle:run`, `/loomcycle:fanout`,
+    `/loomcycle:runs`, `/loomcycle:cancel`, `/loomcycle:compact`,
+    `/loomcycle:memory`, `/loomcycle:eval`, `/loomcycle:steer`.
+  - 🔒 **need an admin token:** `/loomcycle:operator-token` (token minting) and
+    `/loomcycle:snapshot` (runtime-global). A refusal here is *expected*, not a
+    plugin bug — a confined tenant key is meant to be unable to mint or snapshot.
+- **Declared principals (RFC AO) — one token for the UI *and* the plugin.**
+  Instead of minting an `OperatorTokenDef`, the operator can **declare** a stable
+  login in `loomcycle.yaml` and bind it to a secret in `.env.local`:
+  ```yaml
+  principals:
+    marketing: { tenant: acme, subject: marketing, scopes: [runs:create, runs:read, substrate:tenant], token_env: LOOMCYCLE_TOKEN_MARKETING }
+  ```
+  Put that same token in the plugin's `auth_token` **and** use it to log into the
+  loomcycle Web UI (`/ui/login`). Both resolve to the same `(tenant, subject)`,
+  so anything the plugin's agents write in **user scope** (Memory, Documents,
+  Paths) shows up under the identity the Web UI reads — no synthetic-operator
+  mismatch. This is the simplest way to make a plugin-driven agent and the Web UI
+  act as one identity.
+
 ### Token rotation runbook
 
 `/loomcycle:operator-token rotate` mints a replacement valid alongside the old
@@ -211,7 +246,8 @@ claude plugin validate ./claude-code-plugin-loomcycle   # validate before publis
 
 | This plugin | loomcycle | Claude Code |
 |---|---|---|
-| 1.4.0 | Same runtime requirement as 0.21.0 (`loomcycle mcp --upstream` thin client; an instance running at `base_url`). Version-vector track through loomcycle's **v1.2.0 → v1.4.0** line, grounded against source at the **v1.4.0 tag**. **MCP contract is additive — adds the `path` (RFC AL) + `document` (RFC AK) meta-tools** (the thin client auto-advertises them, so an **already-wired** loomcycle MCP server needs no `.mcp.json` edit — see *Wiring a project that doesn't use the plugin's server* under Setup if loomcycle isn't registered there yet). Skill grounding adds the three new primitives an operator configures: **Bashbox** (RFC AJ, v1.3.0 — `LOOMCYCLE_BASHBOX_ENABLED` + the host-command fallback), **Path** (RFC AL — `allowed_tools:[Path]`), and **Documents** (RFC AK — `allowed_tools:[Document]` + `LOOMCYCLE_SQLMEM_ENABLED`, the SQL Memory prerequisite, RFC AA v1.2.0). Thin-client `--upstream` wiring unchanged. | ≥ 2.1 |
+| 1.5.0 | Same runtime requirement as 0.21.0 (`loomcycle mcp --upstream` thin client; an instance running at `base_url`). Tracks loomcycle **`main`** — the **RFC AG** per-principal `/v1/_mcp` transport (PRs #549–#553) + **RFC AO** config-declared principals (#554–#555), **pending the next loomcycle tag (v1.5.0)**. **The MCP tool contract is UNCHANGED** — this is an auth/route change, not new meta-tools: `/v1/_mcp` moves `substrate:admin → substrate:tenant` (a tenant or config-declared-principal `auth_token` can now drive the plugin, confined to its tenant), and a per-tool gate withholds the admin-only meta-tools (`/loomcycle:operator-token` + `/loomcycle:snapshot` need an admin token). RFC AO lets the operator declare a `(tenant, subject)` login in `loomcycle.yaml` and use one token for both the Web UI and the plugin. ⚠️ **Requires a loomcycle build with the RFC AG route flip** for a tenant token to open `/v1/_mcp`; on an older build a tenant token 403s at the route (use an admin token, or upgrade loomcycle). | ≥ 2.1 |
+| 1.4.0 | Same runtime requirement as 0.21.0 (`loomcycle mcp --upstream` thin client; an instance running at `base_url`). Version-vector track through loomcycle's **v1.2.0 → v1.4.0** line, grounded against source at the **v1.4.0 tag**. **MCP contract is additive — adds the `path` (RFC AL) + `document` (RFC AK) meta-tools** (the thin client auto-advertises them, so `.mcp.json` needs no edit). Skill grounding adds the three new primitives an operator configures: **Bashbox** (RFC AJ, v1.3.0 — `LOOMCYCLE_BASHBOX_ENABLED` + the host-command fallback), **Path** (RFC AL — `allowed_tools:[Path]`), and **Documents** (RFC AK — `allowed_tools:[Document]` + `LOOMCYCLE_SQLMEM_ENABLED`, the SQL Memory prerequisite, RFC AA v1.2.0). Thin-client `--upstream` wiring unchanged. | ≥ 2.1 |
 | 1.1.1 | Same runtime requirement as 0.21.0 (`loomcycle mcp --upstream` thin client; an instance running at `base_url`). Tracks loomcycle **v1.1.1** — **RFC AI interactive agentic sessions**: a run with `interactive: true` parks at `end_turn` for operator steering (`POST /v1/runs/{id}/input`) and is re-attachable (`GET /v1/runs/{id}/stream`). Adds `/loomcycle:steer` (HTTP — there is **no MCP steering tool**) + `reference/interactive.md`; `/loomcycle:run` documents the `interactive` flag. MCP tool contract unchanged. *(Documented retroactively in the 1.4.0 changelog backfill.)* | ≥ 2.1 |
 | 1.1.0 | Same runtime requirement as 0.21.0. Tracks loomcycle **v1.1.0** (plugin jumped v0.32.0 → v1.1.0) — the **RFC AH Volume primitive**. ⚠️ loomcycle **breaking change**: `LOOMCYCLE_READ_ROOT` / `WRITE_ROOT` / `BASH_CWD` are fatal config-load errors, replaced by a `volumes:` block. Adds `reference/volumes.md` (migration, `volumes:` fields, `VolumeDef` + gates, ephemeral volumes, spawn narrowing) + the Volume section in `loomcycle-configure`; the `volumedef` meta-tool is now documented. *(Documented retroactively in the 1.4.0 changelog backfill.)* | ≥ 2.1 |
 | 0.32.0 | Same runtime requirement as 0.21.0 (`loomcycle mcp --upstream` thin client; an instance running at `base_url`). Re-grounded against loomcycle source at the **v0.32.0 tag** (loomcycle shipped v0.25.1 → v0.32.0). **MCP contract grew 40 → 42 tools** (both additive): `spawn_runs` (RFC Y external fan-out, ≤32 runs/call → `/loomcycle:fanout`) and `compact_run` (summarize a parked run → `/loomcycle:compact`); `spawn_run` gained an optional `compaction` field (→ `/loomcycle:run --compact`). Skill grounding adds the per-agent `sampling:` (v0.28.0) + `compaction:` (v0.32.0) blocks, `LOOMCYCLE_RESUME_FANOUT` (v0.31.0), and the corrected `${}` deny-list (`PG_DSN`/`LOOMCYCLE_PG_DSN`/`LOOMCYCLE_AUTH_TOKEN` never interpolated, v0.32.0/#462). Thin-client `--upstream` wiring unchanged. | ≥ 2.1 |
