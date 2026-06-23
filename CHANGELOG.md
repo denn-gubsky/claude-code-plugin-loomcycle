@@ -7,9 +7,9 @@ All notable changes to this project are documented here. The format follows
 ## [1.5.0] — 2026-06-23
 
 **Auth: the plugin's `auth_token` is now a first-class tenant identity** —
-tracking loomcycle `main` (RFC AG per-principal `/v1/_mcp` + RFC AO
-config-declared principals, PRs #549–#555), **pending the next loomcycle tag**.
-No new MCP meta-tools — this is an auth/route change. Also retires the legacy
+tracking loomcycle **v1.5.0** (RFC AG per-principal `/v1/_mcp` + RFC AO
+config-declared principals, PRs #549–#555). No new MCP meta-tools — this is an
+auth/route change. Also retires the legacy
 `config_path` userConfig (#18). Version bump `1.4.0 → 1.5.0` (`plugin.json` +
 `marketplace.json`).
 
