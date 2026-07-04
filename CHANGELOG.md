@@ -4,6 +4,45 @@ All notable changes to this project are documented here. The format follows
 [Keep a Changelog](https://keepachangelog.com/) and the project adheres to
 [Semantic Versioning](https://semver.org/).
 
+## [1.6.0] — 2026-07-04
+
+**Reflect loomcycle's latest MCP-tool surface (v1.5.0 → v1.11.1)** — the
+`loomcycle-configure` skill now documents the credential store, token budgets +
+usage/cost, and multimodal image input. No new commands or hooks; skills +
+reference docs only. Version bump `1.5.0 → 1.6.0` (`plugin.json` +
+`marketplace.json`).
+
+### Added
+
+- **`reference/credentials.md`** — the **CredentialDef** store (RFC AR, loomcycle
+  v1.10.0+): the direct MCP meta-tool `mcp__loomcycle__credentialdef`
+  (`create`/`get`/`list`/`delete`; scopes `tenant`/`user`/`agent`, `scope_id`
+  derived from identity; `get`/`list` metadata-only), the **`LOOMCYCLE_SECRET_KEY`
+  fail-closed** gate, and the two consumption paths — `$cred:<name>` in an
+  MCPServerDef `env:`/`headers:` (per-user outbound channels) and the
+  provider/tool **key override by env-var name** (a tenant's own
+  `ANTHROPIC_API_KEY`/`BRAVE_API_KEY` overrides the operator's).
+- **`reference/token-limits.md`** — per-scope **token budgets** (RFC AW, v1.11.0+)
+  + **usage/cost** (RFC AV, v1.10.0+): soft/hard monthly ceilings on
+  operator/tenant/user, why there is **no MCP CRUD tool** (Web UI /
+  `/v1/_limits` only), and how a crossing surfaces on `spawn_run`/`spawn_runs`
+  (a `limits` array on the result; a hard-over run refused with
+  `token_limit_exceeded`).
+
+### Changed
+
+- **`skills/loomcycle-configure/SKILL.md`** — description + two new feature
+  sections (Credentials; Token budgets + usage) + two entries in the reference
+  list.
+- **`reference/env-vars.md`** — new *Credentials, usage & budgets* group
+  (`LOOMCYCLE_SECRET_KEY` [+ `_PREVIOUS`], `LOOMCYCLE_USAGE_*`).
+- **`commands/run.md`** — documents `image` content blocks in `segments` (RFC AT
+  multimodal input, v1.7.0: `media_type` + base64 `data`, user segment only,
+  vision-gated) and how a run reports/refuses on a token budget (`limits` /
+  `token_limit_exceeded`).
+- **`CLAUDE.md`** — *Current loomcycle version* → **v1.11.1**, with RFC
+  AR/AV/AW/AT bullets.
+
 ## [1.5.0] — 2026-06-23
 
 **Auth: the plugin's `auth_token` is now a first-class tenant identity** —

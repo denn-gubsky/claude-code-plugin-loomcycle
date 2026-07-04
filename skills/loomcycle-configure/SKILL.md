@@ -1,6 +1,6 @@
 ---
 name: loomcycle-configure
-description: Configure a loomcycle runtime — providers, model tiers, user tiers, fallbacks, per-agent sampling and context-compaction, environment variables, deployment profiles (brew/in-system, containerized, true sandbox, server, multi-tenant, cloud), filesystem Volumes, the Bashbox in-process sandbox, the Path VFS, chunked-graph Documents, inbound webhooks, and third-party MCP servers. Use when the user wants to set up or tune loomcycle.yaml or its env, pick a deployment posture, wire provider routing/cost-cascades, gate plans, tune decoding (temperature/top_p) or compaction, lock down tool/sandbox/auth, enable or choose between Bash and the Bashbox sandbox (incl. its host-command fallback), name resources with Path, author chunked-graph Documents (and the SQL Memory they require), receive webhooks, or connect external MCP tools.
+description: Configure a loomcycle runtime — providers, model tiers, user tiers, fallbacks, per-agent sampling and context-compaction, environment variables, deployment profiles (brew/in-system, containerized, true sandbox, server, multi-tenant, cloud), filesystem Volumes, the Bashbox in-process sandbox, the Path VFS, chunked-graph Documents, encrypted per-tenant credentials (CredentialDef / $cred: / provider-key override), per-scope token budgets and usage/cost attribution, inbound webhooks, and third-party MCP servers. Use when the user wants to set up or tune loomcycle.yaml or its env, pick a deployment posture, wire provider routing/cost-cascades, gate plans, tune decoding (temperature/top_p) or compaction, lock down tool/sandbox/auth, enable or choose between Bash and the Bashbox sandbox (incl. its host-command fallback), name resources with Path, author chunked-graph Documents (and the SQL Memory they require), store tenant/user API keys or bring-your-own provider keys, set token budgets, receive webhooks, or connect external MCP tools.
 allowed-tools: Read Write Edit Bash(loomcycle validate*) Bash(loomcycle doctor*) Bash(loomcycle init*)
 ---
 
@@ -180,6 +180,34 @@ atomic + orphan-free deletes. **Two gates: `allowed_tools:[Document]` AND
 cause). Scope `agent`/`user` (tenant deferred). **Also a direct MCP meta-tool** —
 `mcp__loomcycle__document`. **Full reference:** [reference/document.md](reference/document.md).
 
+## Credentials — encrypted per-tenant secrets (RFC AR) — v1.10.0+
+
+`CredentialDef` is an **encrypted-at-rest store for named API secrets** — a tenant (or a user)
+stores its own provider/search/MCP keys and other Defs reference them **by name**, bound
+server-side so the model never sees a value (`get`/`list` are metadata-only). **One env gate:
+`LOOMCYCLE_SECRET_KEY`** (a base64 32-byte KEK) — **fail-closed**: unset ⇒ the store is disabled and
+nothing is written (the #1 "credential refused" cause). AES-256-GCM + per-tenant HKDF key, AAD
+row-binding, excluded from snapshots. **Direct MCP meta-tool `mcp__loomcycle__credentialdef`** (ops
+`create`/`get`/`list`/`delete`; scope `tenant`/`user`/`agent`, `scope_id` derived from your identity,
+never the wire; tenant-confined). Two consumption paths: **`$cred:<name>`** in an MCPServerDef
+`env:`/`headers:` (per-user outbound channels — each user's own Telegram/Slack token), and a
+**provider/tool key override by env-var name** (store `ANTHROPIC_API_KEY` / `BRAVE_API_KEY` → a
+tenant's own key overrides the operator's host key, usage attributed to that scope).
+**Full reference:** [reference/credentials.md](reference/credentials.md).
+
+## Token budgets + usage (RFC AW / RFC AV) — v1.10.0+ / v1.11.0+
+
+Per-scope **monthly token budgets** — a `soft` warning and a `hard` cap (refuse *new* runs at
+admission; an in-flight run that crosses hard warns-but-finishes) on `operator`/`tenant`/`user`
+calendar-month token totals (UTC; no row = unlimited; most-restrictive-wins; advisory, per-replica,
+fail-open). Budgets are **set in the Web UI Limits console or over HTTP `GET/PUT/DELETE /v1/_limits`**
+(gRPC `TokenLimit` + TS/Python `setLimit()` too) — **deliberately no MCP CRUD tool** (like steering).
+But you **feel** them on the run tools: `spawn_run`/`spawn_runs` return a **`limits`** array on a soft
+crossing, and a hard-over run is **refused at admission with `token_limit_exceeded`** (429 /
+`ResourceExhausted`). Budgets count what the **RFC AV usage/cost ledger** reports (`GET /v1/_usage` /
+the Web UI **Usage** page — tokens + money by tenant/user/provider/model/source; reporting only, also
+not an MCP tool). **Full reference:** [reference/token-limits.md](reference/token-limits.md).
+
 ## Reference files (read on demand)
 
 - **[reference/routing.md](reference/routing.md)** — providers + API-key env
@@ -207,6 +235,18 @@ cause). Scope `agent`/`user` (tenant deferred). **Also a direct MCP meta-tool** 
   **`LOOMCYCLE_SQLMEM_ENABLED` prerequisite**, optimistic concurrency, atomic
   deletes, and the direct `mcp__loomcycle__document` meta-tool. Read this for any
   chunked-document / co-authoring question.
+- **[reference/credentials.md](reference/credentials.md)** — CredentialDef (RFC AR,
+  v1.10.0+): the encrypted per-tenant/user secret store, the **`LOOMCYCLE_SECRET_KEY`
+  fail-closed gate**, the `create`/`get`/`list`/`delete` ops + scopes, the direct
+  `mcp__loomcycle__credentialdef` meta-tool, and the two consumption paths
+  (`$cred:<name>` in MCP env/headers, and the provider-key override by env-var
+  name). Read this for any bring-your-own-key / per-user-token / secret-store question.
+- **[reference/token-limits.md](reference/token-limits.md)** — Token budgets (RFC AW,
+  v1.11.0+) + usage/cost (RFC AV, v1.10.0+): per-scope monthly soft/hard ceilings,
+  **why there's no MCP CRUD tool** (Web UI / HTTP `/v1/_limits` only), how a
+  crossing surfaces on `spawn_run`/`spawn_runs` (`limits` array + `token_limit_exceeded`
+  refusal), and the `/v1/_usage` reporting split. Read this for any budget /
+  spend-cap / usage-report question.
 - **[reference/profiles.md](reference/profiles.md)** — the six deployment
   profiles in full: trust posture, exact env set, yaml skeleton, and sharp
   edges per profile.
