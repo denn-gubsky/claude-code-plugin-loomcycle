@@ -46,6 +46,24 @@ override (a per-field merge over the agent's own `compaction:` block) — only
 send it when `--compact` was passed; otherwise omit it and the agent's
 configured behaviour applies.
 
+## Image input (RFC AT, loomcycle ≥ v1.7.0)
+
+A **user** segment may carry an `image` content block alongside text — inline
+base64 bytes (no URL form; SSRF-safe). `media_type` is one of `image/png`,
+`image/jpeg`, `image/gif`, `image/webp`; `data` is the base64 payload **with no
+`data:` prefix**:
+
+```json
+{ "role": "user", "content": [
+  { "type": "trusted-text", "text": "What's in this screenshot?" },
+  { "type": "image", "media_type": "image/png", "data": "<base64 bytes>" }
+] }
+```
+
+loomcycle refuses an image to a text-only model **before** the call (and won't
+fail over to a text-only provider), so pick a vision-capable agent/tier. Image
+blocks are valid only in a user segment.
+
 The server streams intermediate events as `notifications/loomcycle/run_event`
 while the call runs (the plugin's MCP client opts into this). For
 **non-interactive** runs the call resolves when the run completes. Render:
@@ -54,6 +72,15 @@ while the call runs (the plugin's MCP client opts into this). For
 - The `agent_id` (the cancel handle — tell the user they can
   `/loomcycle:cancel <agent_id>`).
 - The `run_id` and token usage if present.
+- **`limits`** if present (RFC AW token budgets, loomcycle ≥ v1.11.0) — a
+  per-scope budget crossing observed during the run. Surface each as a warning
+  (`scope`/`severity`/`used`/`limit`/`message`); the run still completed.
+
+**Budget refusal:** if the tool call itself errors with `token_limit_exceeded`
+(HTTP 429 / gRPC `ResourceExhausted`), a **hard** monthly budget was already over
+at admission — nothing was spent. Don't retry; the operator must raise the
+ceiling in the Web UI Limits console (or wait for the month to roll). See
+`skills/loomcycle-configure/reference/token-limits.md`.
 
 **Interactive runs** (started via `POST /v1/runs` with `"interactive": true`,
 RFC AI, v1.1.1+) emit two additional SSE event types to watch for:

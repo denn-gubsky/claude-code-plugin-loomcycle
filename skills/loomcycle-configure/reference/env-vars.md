@@ -177,6 +177,19 @@ behaves under the plugin's calls.
 See the `/loomcycle:operator-token` command and the README's multi-tenant
 section for the token lifecycle + the legacy-token-disable gotcha.
 
+## Credentials, usage & budgets (RFC AR / AV / AW)
+
+| Var | Default | Purpose |
+|---|---|---|
+| `LOOMCYCLE_SECRET_KEY` | (unset) | **Secret** — base64 32-byte KEK for the encrypted `CredentialDef` store (RFC AR). **Fail-closed: unset ⇒ the credential store is disabled** (`create` refused, never plaintext). Per-tenant HKDF key derived from it; AES-256-GCM at rest. `openssl rand -base64 32`. `.env.local` only. See [credentials.md](credentials.md). |
+| `LOOMCYCLE_SECRET_KEY_PREVIOUS` | (unset) | **Secret** — the prior KEK during rotation: decrypt-old, re-encrypt-on-write. Drop it once every row has been rewritten under the new key. |
+| `LOOMCYCLE_USAGE_RETENTION_DAYS` | (default) | RFC AV retention: the per-call `token_usage` ledger is rolled up into the compact `usage_archive` + pruned beyond this window (the sweeper runs periodically). |
+| `LOOMCYCLE_USAGE_ARCHIVE_AGED_RUNS` | off | Opt-in old-run archiver (prune-by-session) for the usage ledger. |
+
+Token **budgets** (RFC AW, `token_limits`) have **no env var** — they're set in
+the Web UI Limits console / `PUT /v1/_limits` and require only a persistent store.
+See [token-limits.md](token-limits.md).
+
 ## Cluster / multi-replica (Postgres required)
 
 | Var | Purpose |
