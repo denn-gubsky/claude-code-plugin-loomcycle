@@ -58,7 +58,7 @@ never in a repo file.
 | ~~`LOOMCYCLE_READ_ROOT`~~ | **⚠️ RETIRED — v1.0.3+ (RFC AH Phase 3). Fatal config-load error if set.** Was: `Read` tool dir root. Replace with `volumes: default: {path: <dir>, mode: ro}` in `loomcycle.yaml`. |
 | ~~`LOOMCYCLE_WRITE_ROOT`~~ | **⚠️ RETIRED — v1.0.3+ (RFC AH Phase 3). Fatal config-load error if set.** Was: `Write`+`Edit` tool dir root. Replace with `volumes: default: {path: <dir>, mode: rw}`. |
 | `LOOMCYCLE_BASH_ENABLED` | `1` to enable `Bash`. **Not a true sandbox** — cwd-restricted, env-scrubbed (only PATH leaks), output-bounded (1 MiB), time-capped (30s default, 5min max). Containerize if exposed to untrusted prompts. |
-| `LOOMCYCLE_BASHBOX_ENABLED` | **(v1.3.0+, RFC AJ)** `1` to enable `Bashbox` — a **TRUE in-process gbash sandbox**: no OS process, no network, paths rooted at the bound volume. Unlike `Bash` it **honors `ro` volumes** (writes hit an in-RAM overlay). Per-agent `allowed_tools:[Bashbox]` still required. Prefer over `Bash` for untrusted/read-only work. See [bashbox.md](bashbox.md). |
+| `LOOMCYCLE_BASHBOX_ENABLED` | **(v1.3.0+, RFC AJ)** `1` to enable `Bashbox` — a **TRUE in-process gbash sandbox**: no OS process, no network, paths rooted at the bound volume. Unlike `Bash` it **honors `ro` volumes** (writes hit an in-RAM overlay). Per-agent `tools:[Bashbox]` still required. Prefer over `Bash` for untrusted/read-only work. See [bashbox.md](bashbox.md). |
 | `LOOMCYCLE_BASHBOX_FALLBACK_COMMANDS` | **(v1.3.0+, RFC AJ §13, OFF by default)** Comma-separated host commands gbash lacks (`git,gh`) that may fall through to the **real host shell** — **only** those names escape the sandbox (no smuggling); requires a `rw` volume; a loud boot `WARNING:` fires. Names only, safe in `.env.insecure`. |
 | `LOOMCYCLE_BASHBOX_FALLBACK_ALLOWED_ENV` | **(v1.3.0+)** Comma-separated env-var **names** the fallback host commands may see (`GH_TOKEN,HOME,SSH_AUTH_SOCK`) — injected into the host child **only**, never the sandbox env (model-invisible). Names here, values stay in `.env.local`. |
 | ~~`LOOMCYCLE_BASH_CWD`~~ | **⚠️ RETIRED — v1.0.3+ (RFC AH Phase 3). Fatal config-load error if set.** Was: Bash working dir. Now the Bash cwd is the volume root — the `path:` of the bound `rw` volume. |
@@ -97,7 +97,7 @@ never in a repo file.
 
 > **`memory_scopes` is default-deny (an agent-yaml gate, not an env var).** These
 > env vars only tune limits — they do **not** grant access. An agent with
-> `Memory` in `allowed_tools` but **no** `memory_scopes:` list sees every Memory
+> `Memory` in `tools` but **no** `memory_scopes:` list sees every Memory
 > call refused. Give it `memory_scopes: [agent]` (and/or `user`) to enable it
 > (the second default-deny layer — see SKILL.md safety rule #3).
 

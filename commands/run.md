@@ -40,7 +40,7 @@ wrapped as **segments**, not a `prompt` string):
 ```
 
 Omit `user_id` / `user_bearer` when not known rather than sending empty strings.
-Do **not** invent `allowed_tools` or `allowed_hosts` — leave them out so the
+Do **not** invent `tools` or `allowed_hosts` — leave them out so the
 operator's static policy applies. `spawn_run` accepts an optional `compaction`
 override (a per-field merge over the agent's own `compaction:` block) — only
 send it when `--compact` was passed; otherwise omit it and the agent's

@@ -1,6 +1,6 @@
 ---
 name: loomcycle-diff-agentdefs
-description: Diff two loomcycle AgentDef versions by def_id and show what changed in system_prompt, allowed_tools, max_tokens, and other fields. Use when the user wants to compare two versions of a self-evolving agent definition.
+description: Diff two loomcycle AgentDef versions by def_id and show what changed in system_prompt, tools, max_tokens, and other fields. Use when the user wants to compare two versions of a self-evolving agent definition.
 ---
 
 # Diff two loomcycle AgentDef versions
@@ -22,12 +22,12 @@ Steps:
    ```
 
    Each returns a row whose `definition` field is the agent config —
-   `system_prompt`, `allowed_tools`, `max_tokens`, provider/model/tier, etc.
+   `system_prompt`, `tools`, `max_tokens`, provider/model/tier, etc.
 
 3. **Diff the definitions** field by field. Highlight, in this order:
    - `system_prompt` — show a readable diff (added / removed lines), not the
      two full prompts side by side unless they're short.
-   - `allowed_tools` — which tools were added / removed.
+   - `tools` — which tools were added / removed.
    - `max_tokens`, `model`, `provider`, `tier`, `effort` — any scalar changes.
    - Any other changed keys.
 

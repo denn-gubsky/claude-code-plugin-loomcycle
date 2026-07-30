@@ -19,15 +19,15 @@ wrong mapping), not *confidentiality*.
 
 ## Enablement — one gate
 
-`Path` is **always registered**; the only gate is the per-agent `allowed_tools`:
+`Path` is **always registered**; the only gate is the per-agent `tools`:
 
 ```yaml
 agents:
   organizer:
-    allowed_tools: [Path, Memory, Document]
+    tools: [Path, Memory, Document]
 ```
 
-There is **no** env flag and **no** separate scope policy (v1) — `allowed_tools:
+There is **no** env flag and **no** separate scope policy (v1) — `tools:
 [Path]` grants all three scopes (`agent`/`user`/`tenant`). Because a dirent is a
 name and not an authority grant, the risk is integrity, not confidentiality.
 
@@ -94,7 +94,7 @@ satisfies). `.mcp.json` needs no edit — the thin client auto-advertises the to
 - **`rm` is dirent-only** — it removes the *name*, not the backing resource (the
   Memory entry / Volume / Document survives, re-nameable). `resource_too`
   (cascade-delete the resource) is **not supported in v1**.
-- **No per-agent `path_scopes` ACL yet** — `allowed_tools: [Path]` grants all
+- **No per-agent `path_scopes` ACL yet** — `tools: [Path]` grants all
   scopes; a finer ACL is a follow-up.
 - **Pre-existing volumes don't auto-mount** — `mount_at` registers a dirent at
   *create* time only.

@@ -44,7 +44,7 @@ Notes for the call:
   raised as an error.
 - To group the batch for cost attribution, set the **same**
   `parent_context.root_agent_run_id` on every entry.
-- Do **not** invent `allowed_tools` / `allowed_hosts` — omit so the operator's
+- Do **not** invent `tools` / `allowed_hosts` — omit so the operator's
   static policy applies.
 
 Render the returned envelope as a markdown table, in index order:

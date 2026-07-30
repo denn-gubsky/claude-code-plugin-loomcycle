@@ -68,7 +68,7 @@ mcp__loomcycle__credentialdef  { "op": "create", "scope": "user", "name": "teleg
 mcp__loomcycle__credentialdef  { "op": "list",   "scope": "tenant" }
 ```
 
-Also in-band (agents with `allowed_tools:[CredentialDef]`), on HTTP
+Also in-band (agents with `tools:[CredentialDef]`), on HTTP
 (`POST /v1/_credentialdef`), gRPC, and the TS/Python adapters.
 
 ---
