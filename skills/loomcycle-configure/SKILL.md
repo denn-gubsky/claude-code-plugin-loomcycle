@@ -37,11 +37,11 @@ The six deployment profiles the operator may ask about are points on a
    *operator* root/allowlist env var is set. (b) The capability tools
    `Memory`/`Channel`/`AgentDef`/`ScheduleDef`/… additionally refuse until the
    *agent* carries an explicit scope list (`memory_scopes`, `channels:`,
-   `agent_def_scopes`, …) — having the tool in `allowed_tools` is necessary but
-   **not sufficient**. An agent sees `operator-enabled ∩ allowed_tools ∩
+   `agent_def_scopes`, …) — having the tool in `tools` is necessary but
+   **not sufficient**. An agent sees `operator-enabled ∩ tools ∩
    per-tool-scope`. Recommend the *narrowest* setting that works at every layer;
    never widen "to make it work." *(v0.23.3 (F21/#389), loomcycle emits a boot
-   `WARNING:` when a tool is in `allowed_tools` but its gate is unset — `Memory`
+   `WARNING:` when a tool is in `tools` but its gate is unset — `Memory`
    w/o `memory_scopes`, `Channel` w/o `channels`, `Evaluation` w/o
    `evaluation_scopes`, `Interruption` w/o `interruption.enabled` — so this
    silent default-deny is now visible at startup, surfaced in `cfg.Warnings` /
@@ -151,7 +151,7 @@ VolumeDef op catalogue, spawn narrowing, validation errors.
 (pure-Go) — **no OS process, no network**, every path rooted at the bound volume. Because the
 isolation is real it **honors read-only volumes** (a `ro` binding mounts under an in-RAM overlay —
 writes succeed in-run but never touch the host; `Bash` refuses `ro`). Opt-in like Bash:
-`LOOMCYCLE_BASHBOX_ENABLED=1` + `allowed_tools:[Bashbox]`. **Prefer Bashbox over Bash for untrusted
+`LOOMCYCLE_BASHBOX_ENABLED=1` + `tools:[Bashbox]`. **Prefer Bashbox over Bash for untrusted
 prompts or read-only work;** use `Bash` only when an agent needs a real host binary (in a contained
 deployment). An operator can allowlist specific host commands gbash lacks (`git`, `gh`) to fall
 through to the host shell via `LOOMCYCLE_BASHBOX_FALLBACK_COMMANDS` (off by default; only those names
@@ -163,7 +163,7 @@ only). Bashbox is **in-band only** — there is no `mcp__loomcycle__bashbox` met
 
 `Path` names Memory entries / Volume mounts / Documents by human-readable paths (`/docs/launch`)
 over a `dirents` inode/dirent table. Six ops (`resolve`/`ls`/`stat`/`mkdir`(no-op)/`mv`/`rm`),
-scope-aware (`agent`/`user`/`tenant`), `..` rejected, tenant-isolated. **Gate: `allowed_tools:
+scope-aware (`agent`/`user`/`tenant`), `..` rejected, tenant-isolated. **Gate: `tools:
 [Path]`** — no env flag, no separate scope policy (a dirent is a name, not an authority grant).
 Resources opt into a name via `Memory.set path:` / `VolumeDef.create mount_at:` /
 `Document.create_document path:`. **Also a direct MCP meta-tool** — call `mcp__loomcycle__path`
@@ -173,12 +173,41 @@ from the plugin without spawning a run (scope + tenant resolved server-side from
 ## Document — chunked-graph documents (RFC AK) — v1.4.0+
 
 `Document` is a tree of **chunks** (UUID, hierarchy, type, fields, edges, Markdown body) that agents
-and humans co-author. Bodies live in Memory; structure lives in **SQL Memory** (queryable). 13 ops
-(document/chunk lifecycle, edges, `query_chunks`, type defs), optimistic `revision` concurrency,
-atomic + orphan-free deletes. **Two gates: `allowed_tools:[Document]` AND
-`LOOMCYCLE_SQLMEM_ENABLED=1`** (the structure tables live in SQL Memory — the #1 "Document refused"
-cause). Scope `agent`/`user` (tenant deferred). **Also a direct MCP meta-tool** —
-`mcp__loomcycle__document`. **Full reference:** [reference/document.md](reference/document.md).
+and humans co-author. Bodies live in Memory; structure lives in **SQL Memory** (queryable). ~24 ops
+(document/chunk lifecycle, edges, `query_chunks`, type defs, image assets, Markdown round-trip, and
+the entity tier below), optimistic `revision` concurrency, atomic + orphan-free deletes. **Two
+gates: `tools:[Document]` AND `LOOMCYCLE_SQLMEM_ENABLED=1`** (the structure tables live in SQL
+Memory — the #1 "Document refused" cause). Scope `agent`/`user`/**`tenant`** (v1.41.0+ — tenant is
+shared across the tenant and needs `tenant` in **both** `memory_scopes` and `sql_scopes`, since a
+document spans both planes). **Also a direct MCP meta-tool** — `mcp__loomcycle__document`.
+**Full reference:** [reference/document.md](reference/document.md).
+
+## Entity memory — bi-temporal facts + the tenant ontology — v1.42.0+
+
+Three Document ops make a document a **fact store that can be corrected without losing what it
+corrected**. `upsert_chunk` writes by **`natural_key`** (unique per scope) so the same fact
+extracted twice converges on one chunk instead of accumulating near-duplicates — the idempotency a
+background consolidator needs; it takes no `revision`, and preserves any field you don't restate.
+`supersede_chunk` retires a fact by stamping both end-timestamps and linking the replacement —
+**the retired fact stays readable**, which is the point. `graph_recall` walks the relations
+bidirectionally (≤2 hops) and is time-aware: `as_of` drops facts the store didn't believe at that
+instant.
+
+Two time axes, answering different questions: `valid_at`/`invalid_at` is **world** time (when the
+fact was true), `created_at`/`expired_at` is **system** time (when the store believed it). `class`
+is `derived` or **`evidential`** — evidential material is exempt from retention pruning at any age,
+because it's what everything else was distilled from.
+
+The entity **types** are `base seed ⊕ tenant layer` (seed = POLE+O + `preference`/`fact`). The
+tenant layer lives at `/memory/ontology` (tenant scope) and is **inert until an operator confirms
+it** — the root chunk's `status` must be exactly `confirmed`, so flip it in the **Web UI → Settings
+→ Ontology** tab rather than typing into the status field, where a typo leaves the layer silently
+inactive. **Full reference:** [reference/document.md](reference/document.md).
+
+> ⚠️ **After upgrading the runtime, reload the plugin.** The plugin ships no tool schemas — the thin
+> client proxies the runtime's own `tools/list`, and Claude Code caches it **once, at connection**.
+> A session opened against an older deployment keeps the old schema, and arguments it doesn't
+> declare get sent as strings (`cannot unmarshal string into Go struct field …`). Reload, don't debug.
 
 ## Credentials — encrypted per-tenant secrets (RFC AR) — v1.10.0+
 
@@ -223,7 +252,7 @@ not an MCP tool). **Full reference:** [reference/token-limits.md](reference/toke
   migration question.
 - **[reference/bashbox.md](reference/bashbox.md)** — Bashbox (RFC AJ, v1.3.0+):
   the true in-process gbash sandbox vs `Bash`, enablement
-  (`LOOMCYCLE_BASHBOX_ENABLED` + `allowed_tools`), how it honors `ro` volumes, the
+  (`LOOMCYCLE_BASHBOX_ENABLED` + `tools`), how it honors `ro` volumes, the
   operator host-command fallback (`LOOMCYCLE_BASHBOX_FALLBACK_*`), and gbash
   coverage caveats. Read this for any sandboxed-shell or `Bash`-vs-`Bashbox` question.
 - **[reference/path.md](reference/path.md)** — Path primitive (RFC AL, v1.4.0+):

@@ -74,11 +74,11 @@ different set:
 ```yaml
 agents:
   dispatcher:
-    allowed_tools: [VolumeDef, Bash, Agent]
+    tools: [VolumeDef, Bash, Agent]
     volumes: [default, dynamic-root]     # explicit list
 
   reviewer:
-    allowed_tools: [Read, Grep, Glob]
+    tools: [Read, Grep, Glob]
     # volumes: omitted → binds to default automatically
 ```
 
@@ -110,7 +110,7 @@ volumes:
 
 agents:
   dispatcher:
-    allowed_tools: [Context, VolumeDef, Bash, Agent, Memory]
+    tools: [Context, VolumeDef, Bash, Agent, Memory]
     volume_def_scopes: [any]          # gate 1
     volumes: [default, dynamic-root]  # gate 2: dynamic-root in the binding list
 ```

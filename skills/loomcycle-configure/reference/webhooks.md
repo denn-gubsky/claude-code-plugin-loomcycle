@@ -253,7 +253,7 @@ self-hosted Gitea driving the receiver across the tailnet.)
 Agents call out to external tools (a Gitea/GitHub MCP, a Slack bot, an n8n
 workflow, a Telegram sender). Each declared server's tools register as
 **`mcp__<server>__<tool>`** after `tools/list` discovery; an agent opts in by
-globbing `mcp__<server>__*` (or naming individual tools) in its `allowed_tools`.
+globbing `mcp__<server>__*` (or naming individual tools) in its `tools`.
 
 ```yaml
 mcp_servers:
@@ -265,7 +265,7 @@ mcp_servers:
       GITEA_HOST: "https://gitea.example.ts.net:30008"
       GITEA_ACCESS_TOKEN: "${LOOMCYCLE_GITEA_TOKEN}"   # see allowlist note below
     pool_size: 2
-    allowed_tools: [create_pull_request, pull_request_read]   # operator-level filter (optional)
+    tools: [create_pull_request, pull_request_read]   # operator-level filter (optional)
 
   jobs:                            # http: dialed per tool-call (own process/host)
     transport: http
@@ -274,8 +274,8 @@ mcp_servers:
       Authorization: "Bearer ${LOOMCYCLE_JOBS_API_TOKEN}"
 ```
 
-- **Operator-level `allowed_tools`** on a server narrows which of its tools are
-  registered **at all**, before any agent's own `allowed_tools` is consulted —
+- **Operator-level `tools`** on a server narrows which of its tools are
+  registered **at all**, before any agent's own `tools` is consulted —
   two filters in series.
 - **http**/**streamable-http** servers are dialed per-call and may *also* be
   registered at runtime via the MCPServerDef substrate
@@ -293,7 +293,7 @@ mcp_servers:
   never sees it.
 
 > **A dynamic-MCP-only agent now actually calls its tools (v0.23.5, F33/#409).**
-> An agent whose `allowed_tools` is **only** a runtime-MCP wildcard (e.g.
+> An agent whose `tools` is **only** a runtime-MCP wildcard (e.g.
 > `["mcp__telegram-dyn__*"]`, no native tool) — the natural "single-purpose
 > notifier" shape — used to **silently no-op**: dynamic MCP tools were a
 > first-call *fallback* and were never **advertised** to the model, so with zero
@@ -367,5 +367,5 @@ yaml-load (the `.` can't match the `${}` name regex, so they survive verbatim)
 | spawned agent gets an **empty** task | **v0.23.0 binary** with no `payload_mapping.goal` (v0.23.3 F28 defaults to the raw body) | upgrade, or add `payload_mapping: { goal: "$" }` |
 | MCP server `401`s; header shows literal `${FOO}` | non-allowlisted `${}` name | rename secret to `LOOMCYCLE_*` and map it: `FOO: "${LOOMCYCLE_FOO}"` |
 | webhook → `rejected_spawn_setup: unknown agent` (target is an AgentDef/runtime agent) | pre-v0.23.3 webhook-spawn resolver read yaml agents only (F30) | upgrade to **v0.23.3+**, or declare the target as a static `agents:` yaml entry |
-| "notifier" agent reports success but **nothing is sent**; its `allowed_tools` is only `mcp__server__*` | pre-v0.23.5 didn't advertise dynamic-MCP tools, so the call was emitted as text, never dispatched (F33) | upgrade to **v0.23.5+**, or give the agent one native tool (e.g. `Context`) to enter tool-calling mode |
+| "notifier" agent reports success but **nothing is sent**; its `tools` is only `mcp__server__*` | pre-v0.23.5 didn't advertise dynamic-MCP tools, so the call was emitted as text, never dispatched (F33) | upgrade to **v0.23.5+**, or give the agent one native tool (e.g. `Context`) to enter tool-calling mode |
 | external sender can't reach the receiver | `LISTEN_ADDR=127.0.0.1` | bind a reachable IP (tailnet IP for a tailnet sender; no relay needed) |

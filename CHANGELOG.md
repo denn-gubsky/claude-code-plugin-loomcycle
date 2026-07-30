@@ -4,6 +4,71 @@ All notable changes to this project are documented here. The format follows
 [Keep a Changelog](https://keepachangelog.com/) and the project adheres to
 [Semantic Versioning](https://semver.org/).
 
+## [1.7.0] — 2026-07-30
+
+**Reflect loomcycle v1.11.1 → v1.42.0, and fix every yaml example in the repo.**
+Skills + reference docs + the version claim; no new commands or hooks. Version bump
+`1.6.0 → 1.7.0` (`plugin.json` + `marketplace.json`).
+
+### Fixed
+
+- **Every yaml example used a config key the runtime stopped reading.** loomcycle
+  v1.13.0 renamed the agent (and `mcp_servers.*`) key `allowed_tools:` →
+  **`tools:`**, and the old spelling is now **silently ignored** — `loomcycle
+  validate` still prints `OK` while the agent ends up with an empty allowlist, which
+  fails closed to *no tools at all*. So an operator following these docs got an agent
+  that could do nothing, with no error anywhere to explain why. Renamed across 14
+  files (47 occurrences); `allowed_hosts` is a different key and is untouched.
+- **`reference/document.md` stated three things that had stopped being true**: the op
+  count (13 → ~24), "tenant scope is deferred / `scope:tenant` is refused" (tenant
+  scope shipped in v1.41.0), and "Markdown round-trip and a Web UI tree/editor are
+  later phases — not in this core" (both shipped: `export_md`/`import_md`, and the
+  document viewer in v1.29–v1.31).
+
+### Added
+
+- **The entity tier + the tenant ontology** (loomcycle v1.42.0) in
+  `reference/document.md` and a new SKILL.md section: `upsert_chunk` (write by
+  `natural_key`, unique per scope, no `revision`, preserves unspecified fields),
+  `supersede_chunk` (retire without deleting — the retired fact stays readable),
+  `graph_recall` (bidirectional ≤2-hop walk with an `as_of` time filter). The
+  bi-temporal split is spelled out because it is the part that gets misread:
+  `valid_at`/`invalid_at` is **world** time, `created_at`/`expired_at` is **system**
+  time. `class: evidential` is exempt from retention pruning at any age.
+- **The tenant ontology gate.** `/memory/ontology` (tenant scope) layers over a base
+  seed and is **inert until an operator confirms it** — the root chunk's `status` must
+  be exactly `confirmed`, so the docs point at the Web UI → Settings → Ontology tab
+  rather than hand-editing a status field where a typo leaves the layer silently
+  inactive.
+- **Tenant scope needs TWO grants** (`tenant` in *both* `memory_scopes` and
+  `sql_scopes`) — a document spans both planes, and granting one reaches structure
+  with no text.
+- **"After you upgrade the runtime, reload the plugin"**, in `CLAUDE.md`, the
+  configure SKILL.md and `reference/document.md`. This repo ships **no tool schemas**:
+  `loomcycle mcp --upstream` proxies the runtime's own `tools/list` and Claude Code
+  caches it **once, at connection**. An already-open session therefore keeps the old
+  schema after an upgrade — ops still dispatch (strings pass through) but any argument
+  the cached schema doesn't declare is sent as a string and rejected (`cannot
+  unmarshal string into Go struct field …`). Documented because it presents exactly
+  like a stale plugin schema, and there is no schema here to fix.
+
+### Known gaps, stated rather than implied
+
+`CLAUDE.md` now lists the runtime surface this repo does **not** yet document, so
+nobody infers coverage from silence: the **History** tool (v1.20.0), **TeamDef**
+orchestration (v1.17–1.19), the **sandbox** toolbox (v1.23–1.24), client-executed
+tools over WebSocket (v1.16.0), search providers (v1.15.0), resident/interactive
+sub-agents (v1.26–1.28), the retention sweeper (v1.32.0), `Context op=capabilities`
+(v1.34.0), the per-agent `skills:` allowlist (v1.14.0), and `{{tool:…}}` prompt
+expansion (v1.40.0).
+
+### Runtime compatibility
+
+Recommend **loomcycle v1.42.1+**. Exactly v1.42.0 has a re-upsert bug in the entity
+tier — an upsert omitting a field wiped the sidecar row, silently un-retiring a
+superseded fact and downgrading `class: evidential` — fixed immediately after the
+tag. Noted at each place the entity tier is described.
+
 ## [1.6.0] — 2026-07-04
 
 **Reflect loomcycle's latest MCP-tool surface (v1.5.0 → v1.11.1)** — the

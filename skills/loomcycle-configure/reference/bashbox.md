@@ -10,7 +10,7 @@ real — so it can do something `Bash` can't: **honor read-only volumes**.
 Opt-in exactly like Bash, in two layers:
 
 1. **`LOOMCYCLE_BASHBOX_ENABLED=1`** — the operator env flag (per deployment).
-2. **`allowed_tools: [Bashbox]`** — the per-agent gate.
+2. **`tools: [Bashbox]`** — the per-agent gate.
 
 Stateless per call (no shell state persists between invocations).
 
@@ -30,7 +30,7 @@ Stateless per call (no shell state persists between invocations).
 | Read-only volume | **refuses** a `ro` volume (can't enforce it) | **honors** `ro` — writes hit an in-RAM overlay, never the host |
 | Host binaries | yes (real `/bin/sh`, `git`, `curl`, …) | only gbash builtins + bundled `awk`/`jq` (~97% `/bin/sh` parity); `git`/network absent by default |
 | Network | yes (subject to no tool-level guard) | **none** |
-| Enable | `LOOMCYCLE_BASH_ENABLED=1` + `allowed_tools:[Bash]` | `LOOMCYCLE_BASHBOX_ENABLED=1` + `allowed_tools:[Bashbox]` |
+| Enable | `LOOMCYCLE_BASH_ENABLED=1` + `tools:[Bash]` | `LOOMCYCLE_BASHBOX_ENABLED=1` + `tools:[Bashbox]` |
 
 **Recommendation:** prefer **Bashbox** for untrusted prompts or read-only work
 (it's the sandbox `Bash` only pretends to be). Use **Bash** only when the agent
@@ -59,7 +59,7 @@ volumes:
 
 agents:
   analyzer:
-    allowed_tools: [Read, Grep, Glob, Bashbox]   # no Bash — true-sandbox posture
+    tools: [Read, Grep, Glob, Bashbox]   # no Bash — true-sandbox posture
     # binds to `src` (default) automatically
 ```
 
@@ -101,7 +101,7 @@ value in any file (SKILL.md safety rule #2). The plugin never reads `.env.local`
 - **gbash is alpha and pinned** to an exact version. Coverage is high (~97%
   `/bin/sh` on a representative agent corpus) but not total — a missing builtin
   fails the command (use the host-command fallback for the few you need, or
-  fall back to `Bash` in a contained deployment). The per-agent `allowed_tools`
+  fall back to `Bash` in a contained deployment). The per-agent `tools`
   gate is the escape hatch.
 - **No network** without the fallback — agents that fetch should use the
   `HTTP`/`WebFetch`/`WebSearch` tools (host-allowlisted), not Bashbox.

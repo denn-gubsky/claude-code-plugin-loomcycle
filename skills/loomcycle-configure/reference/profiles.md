@@ -45,7 +45,7 @@ LOOMCYCLE_MCP_ALLOW_PRIVILEGED_TOOLS=1        # only because the stdio MCP clien
 ```
 
 Storage: SQLite (`LOOMCYCLE_DATA_DIR=./data`, the default). Agents may list
-`allowed_tools` including `Bash`/`Write`/`Edit`/`Read`/`Grep`/`Glob`.
+`tools` including `Bash`/`Write`/`Edit`/`Read`/`Grep`/`Glob`.
 
 **Sharp edges:** Bash is cwd-restricted but *not isolated* — anything your user
 can do, a prompt can do. Fine here because you trust the prompts. The moment
@@ -138,21 +138,21 @@ LOOMCYCLE_CODE_AGENTS_ROOT=/home/nonroot/.local/share/loomcycle/agent_code
 LOOMCYCLE_CODE_AGENTS_RUN_TIMEOUT_SECONDS=60
 ```
 
-Agent `allowed_tools` should be the minimal set (often just `Read` on a fixed
+Agent `tools` should be the minimal set (often just `Read` on a fixed
 root, or specific `mcp__*` tools). Run inside the profile-2 container, add
 seccomp/read-only-rootfs/`--cap-drop=ALL` at the container layer, and keep the
 listener bound to loopback behind your app.
 
 **The capability tools have a *second* default-deny gate.** Beyond the operator
-tool-enable (Bash/Read/Write/HTTP env vars) and the agent `allowed_tools`,
+tool-enable (Bash/Read/Write/HTTP env vars) and the agent `tools`,
 `Memory` / `Channel` / `AgentDef` / `ScheduleDef` each refuse until the agent
 *also* carries an explicit scope list — `memory_scopes:`, `channels:` (per-side
 publish/subscribe ACL), `agent_def_scopes:` (`self`/`descendants`/`named:<n>`/
-`any`). Listing the tool in `allowed_tools` is necessary but **not** sufficient.
+`any`). Listing the tool in `tools` is necessary but **not** sufficient.
 This is least-privilege working *for* you here: an agent you didn't scope can't
-touch memory or the bus even if its `allowed_tools` say `Memory`/`Channel`. Add
+touch memory or the bus even if its `tools` say `Memory`/`Channel`. Add
 scopes deliberately, narrowest first. *(Post-v0.23.0, loomcycle surfaces each
-missing gate as a boot `WARNING:` — e.g. "allowed_tools includes Memory but
+missing gate as a boot `WARNING:` — e.g. "tools includes Memory but
 memory_scopes is empty — every Memory op will default-deny" — so a forgotten
 scope is visible at startup rather than looking like the agent "chose" not to use
 the tool; F21.)*
