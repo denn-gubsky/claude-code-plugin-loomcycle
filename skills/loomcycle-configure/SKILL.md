@@ -194,7 +194,9 @@ bidirectionally (≤2 hops) and is time-aware: `as_of` drops facts the store did
 instant.
 
 Two time axes, answering different questions: `valid_at`/`invalid_at` is **world** time (when the
-fact was true), `created_at`/`expired_at` is **system** time (when the store believed it). `class`
+fact was true), `created_at`/`expired_at` is **system** time (when the store believed it). Only the
+world pair is caller-settable, so a retired fact **cannot be un-retired** — to retract a correction
+you record another one, superseding the superseder. `class`
 is `derived` or **`evidential`** — evidential material is exempt from retention pruning at any age,
 because it's what everything else was distilled from.
 
