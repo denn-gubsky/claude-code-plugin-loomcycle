@@ -166,8 +166,16 @@ point, so a question about an earlier instant still has an answer. `id` and
 pair precisely because transposing them would invalidate the *new* fact and leave
 the stale one current.
 
-Reviving a retired fact is possible but must be **explicit** (pass `invalid_at`
-yourself). It is not something a routine write does as a side effect.
+**A retired fact cannot be revived through the upsert**, deliberately. `invalid_at`
+is world time and caller-settable; `expired_at` is **system** time, is never
+caller-settable, and `retired` keys on the system axis — so pushing `invalid_at` into
+the future changes when the fact stopped being true and leaves it retired.
+
+That is the right shape for a bi-temporal store rather than a gap: system time is
+append-only, and *"we stopped believing X at T"* is itself a historical fact. To
+retract a correction, **record another one** — write a new fact and supersede the
+superseder. Berlin → Hamburg → Berlin-again leaves one current answer with the whole
+chain and its timestamps intact.
 
 ### `graph_recall` — walk the relations, time-aware
 
