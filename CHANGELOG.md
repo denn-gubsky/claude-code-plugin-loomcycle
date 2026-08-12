@@ -4,6 +4,23 @@ All notable changes to this project are documented here. The format follows
 [Keep a Changelog](https://keepachangelog.com/) and the project adheres to
 [Semantic Versioning](https://semver.org/).
 
+## [1.7.1] — 2026-08-01
+
+**Correct a claim that was backwards.** Docs only; no version-behaviour change.
+
+### Fixed
+
+- **"Reviving a retired fact is possible — pass `invalid_at` yourself"** was **false**,
+  in `reference/document.md` and by implication in the configure SKILL.md. `invalid_at`
+  is world time and caller-settable; `expired_at` is **system** time, is never
+  caller-settable, and the retired predicate keys on the system axis — so pushing
+  `invalid_at` into the future changes when a fact stopped being true and leaves it
+  retired. Verified against a live v1.42.1 deployment rather than reasoned about.
+  The behaviour is correct (system time in a bi-temporal store is append-only; *"we
+  stopped believing X at T"* is itself a historical fact); the documentation was the
+  error. Both files now name the path that does work — **supersede the superseder** —
+  which leaves the whole chain and its timestamps intact.
+
 ## [1.7.0] — 2026-07-30
 
 **Reflect loomcycle v1.11.1 → v1.42.0, and fix every yaml example in the repo.**
