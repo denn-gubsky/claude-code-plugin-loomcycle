@@ -204,7 +204,14 @@ The entity **types** are `base seed ⊕ tenant layer` (seed = POLE+O + `preferen
 tenant layer lives at `/memory/ontology` (tenant scope) and is **inert until an operator confirms
 it** — the root chunk's `status` must be exactly `confirmed`, so flip it in the **Web UI → Settings
 → Ontology** tab rather than typing into the status field, where a typo leaves the layer silently
-inactive. **Full reference:** [reference/document.md](reference/document.md).
+inactive.
+
+Nesting in that document is a **type hierarchy** (v1.52.0): a child chunk is a **subclass** of its
+parent, inheriting its fields, and a type filter on `list_facts`/`query_chunks` matches subtypes too
+— so `type=event` returns `incident` rows. And since v1.53.0 **your agent cannot edit that document**:
+on the ontology alone a run may only file a `proposed` entity, through `propose_entity`, which an
+operator then accepts or rejects. Everything else there is refused. **Full reference:**
+[reference/document.md](reference/document.md).
 
 > ⚠️ **After upgrading the runtime, reload the plugin.** The plugin ships no tool schemas — the thin
 > client proxies the runtime's own `tools/list`, and Claude Code caches it **once, at connection**.

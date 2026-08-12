@@ -1,4 +1,4 @@
-# Document primitive reference — RFC AK (v1.4.0+), entity tier (v1.42.0)
+# Document primitive reference (v1.4.0+), entity tier (v1.42.0), ontology hierarchy (v1.52.0)
 
 A `Document` is a **chunked-graph document**: instead of one opaque blob, it's a
 tree of **chunks** — each a first-class unit with a UUID, a hierarchy position,
@@ -41,7 +41,7 @@ LOOMCYCLE_SQLMEM_ENABLED=1
 > to *no tools at all*. If an agent mysteriously has nothing available, check this
 > first.
 
-> SQL Memory (RFC AA, loomcycle v1.2.0) is a per-scope SQL database that is a
+> SQL Memory (loomcycle v1.2.0) is a per-scope SQL database that is a
 > facet of the `Memory` tool — Document piggybacks on it for structure storage. At
 > `agent`/`user` scope an agent that uses Document does **not** need `Memory`'s
 > `sql_scopes` gate; the Document tool issues its own trusted SQL. **Tenant scope
@@ -55,12 +55,15 @@ LOOMCYCLE_SQLMEM_ENABLED=1
 |---|---|
 | Document lifecycle | `create_document`, `get_document` (by `id` or `path`), `documents_summary`, `delete_document`, `set_path` |
 | Chunk lifecycle | `create_chunk` (`parent_id`/`position`/`after_id`), `get_chunk`, `update_chunk`, `delete_chunk`, `move_chunk`, `reorder_chunk` |
-| Entity tier (v1.42.0) | `upsert_chunk`, `supersede_chunk`, `graph_recall` |
-| Edges | `link_chunks`, `unlink_chunks`, `get_edges` |
-| Query | `query_chunks` |
+| Entity tier (v1.42.0) | `upsert_chunk`, `supersede_chunk`, `graph_recall`, `list_facts` |
+| Ontology (v1.53.0) | `propose_entity` — SUGGEST a type; see the ontology section |
+| Edges | `link_chunks`, `unlink_chunks`, `get_edges`, `backlinks`, `related`, `unlinked_mentions` |
+| Query | `query_chunks`, `query_documents`, `search` (semantic, over chunk bodies) |
+| Tags | `add_tags`, `remove_tags`, `list_tags` |
+| History | `history`, `get_version`, `diff` |
 | Types | `define_type`, `list_types` |
 | Images (v1.30.0) | `set_asset`, `get_asset` |
-| Markdown | `export_md`, `import_md` |
+| Markdown / canvas | `export_md`, `import_md`, `export_canvas`, `import_canvas` |
 
 `scope` is `agent` (default), `user` (needs a `user_id` on the run), or **`tenant`**
 (shared by every user and agent in the tenant — since v1.41.0).
@@ -222,6 +225,59 @@ operator can author the ontology before any run needs it.
 
 Agents reach the effective list through the `{{memory:ontology}}` system-prompt
 placeholder.
+
+### A child chunk is a subclass (v1.52.0)
+
+Nesting in that document is a **type hierarchy**: one chunk is one entity, its
+title names it, backticked bullets in its body declare its fields, and a **child
+chunk is a subclass of its parent**. A subclass inherits its parent's fields and
+adds its own, up to four levels deep.
+
+This matters beyond tidiness, because retrieval expands it: `list_facts` and
+`query_chunks` filtered on a type also match its subtypes, so `type=event` returns
+`incident` and `outage` rows too. Storage keeps the concrete type only, so
+re-parenting a type takes effect immediately and retroactively. The response
+reports `type_expanded_to` when a filter widened.
+
+Two rules worth knowing before you author one:
+
+- To subclass a **standard** type, first declare it yourself as a top-level entity
+  (which overrides the standard one **wholesale** — a field a later release adds to
+  it will not reach your copy), then nest beneath your copy. The Settings panel has
+  an **adopt** button that makes that copy for you, fields and all.
+- `preference` and `fact` are the memory tier's own types and always stay top-level.
+  You may nest types *under* them; nesting them under one of yours is ignored.
+
+### An agent may SUGGEST a type, never decide one (v1.53.0)
+
+**Your agent cannot edit the ontology document.** On that document alone, a tool
+call from a run may only add a chunk whose `status` is `proposed`; updating,
+deleting, moving, superseding, importing over it, re-homing it, or creating a live
+entity are all refused. Resolving a suggestion is an operator action on a surface a
+run cannot reach.
+
+Use `propose_entity` — it resolves the ontology itself, takes the parent **by name**
+(the names you were given in `{{memory:ontology}}`), stamps the inert status, and
+refuses a name already in force, already proposed, or already rejected:
+
+```json
+{"op":"propose_entity","name":"outage","parent":"event",
+ "body":"Seen 14 times on facts that are all service outages.\nExamples: \"the Tuesday checkout outage\".\n\n- `minutes_down`\n- `cause`"}
+```
+
+Put your **evidence** in the body — counts and a couple of example titles. The
+operator decides from it, in Settings → Ontology, where each suggestion gets accept
+and reject. Accepting clears the status in place, so the type lands exactly where you
+filed it and inherits from the parent you chose. A rejection is **kept** as a
+tombstone: if the tool tells you a name was already rejected, an operator has looked
+at it and said no — do not file it again.
+
+`propose_entity` needs **no** tenant grant, deliberately: a suggestion cannot change
+what any run is told, so a curator does not need write authority over the tenant's
+shared store to offer one.
+
+The bundled **`memory/ontologist`** agent (in the `memory` bundle) does this as a
+pass over one user's stored facts, on demand from the Settings panel.
 
 ---
 
