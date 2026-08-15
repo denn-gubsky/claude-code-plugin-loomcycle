@@ -56,6 +56,7 @@ LOOMCYCLE_SQLMEM_ENABLED=1
 | Document lifecycle | `create_document`, `get_document` (by `id` or `path`), `documents_summary`, `delete_document`, `set_path` |
 | Chunk lifecycle | `create_chunk` (`parent_id`/`position`/`after_id`), `get_chunk`, `update_chunk`, `delete_chunk`, `move_chunk`, `reorder_chunk` |
 | Entity tier (v1.42.0) | `upsert_chunk`, `supersede_chunk`, `graph_recall`, `list_facts` |
+| Verified writes (v1.54.0) | `judge_fact`, `verbatim_answer`, `verification_stats` — see the section below |
 | Ontology (v1.53.0) | `propose_entity` — SUGGEST a type; see the ontology section |
 | Edges | `link_chunks`, `unlink_chunks`, `get_edges`, `backlinks`, `related`, `unlinked_mentions` |
 | Query | `query_chunks`, `query_documents`, `search` (semantic, over chunk bodies) |
@@ -270,6 +271,62 @@ shared store to offer one.
 
 The bundled **`memory/ontologist`** agent (in the `memory` bundle) does this as a
 pass over one user's stored facts, on demand from the Settings panel.
+
+---
+
+## Verified writes — quote a fact instead of generating one (v1.54.0)
+
+A fact can carry **the span of source text it was drawn from**, and a judge can be
+asked whether that span actually carries the claim. A fact that fails stops being
+returned by the fact surfaces — it is never deleted.
+
+This changes three things for you.
+
+**Pass the span when you write a fact.** `upsert_chunk` takes `source_quote`: the
+sentence you drew the claim from, copied verbatim from the source. A fact with no
+span cannot be verified by anyone later, which makes it permanently second-class.
+
+```json
+{"op":"upsert_chunk","scope":"user","natural_key":"fact:gh-username",
+ "title":"The user's github username is denn.","body":"The user's github username is denn.",
+ "type":"person","subject":"the user","source_quote":"my github username is denn"}
+```
+
+**Some facts are hidden from you, on purpose.** `list_facts` and `graph_recall` omit
+facts a judge refused. If you are diagnosing why something you remember writing is
+not coming back, pass `include_refuted: true` — each refused fact comes back with the
+judge's stated reason. A fact with **no** verdict is not hidden; unjudged and refuted
+are different states, and only the second is withheld.
+
+**Do not judge your own facts.** `judge_fact` exists for the verification pass, which
+runs a separate agent that never wrote the claim it is checking. An agent marking its
+own writes `supported` is self-certification and defeats the entire mechanism. If you
+have written something you believe is well-evidenced, leave it unjudged — that reads
+as *unverified*, which is honest, rather than as *checked*, which would be false.
+
+**Prefer quoting over generating for lookup questions.** Before you compose an answer
+to something like "what is my github username", ask:
+
+```json
+{"op":"verbatim_answer","scope":"user","query":"what is my github username"}
+```
+
+It returns the stored claim **verbatim** plus the span it was verified against, so
+your answer carries a citation and no invented wording:
+
+```json
+{"answered":true,"answer":"The user's github username is denn.",
+ "source":"my github username is denn","confidence":0.9,"score":0.94}
+```
+
+It refuses far more often than it answers, and that is the design. `answered:false`
+comes with a `reason` — the closest fact is unverified, or below the similarity floor,
+or two facts match about equally well. **Treat a refusal as "answer normally", never as
+"there is nothing".** It only works for lookup: "what is my github username" has a
+verbatim answer, "how should I structure this migration" does not.
+
+`verification_stats` reports how much of a scope is verified — mostly an operator's
+number, useful to you if you are deciding how much to trust the store.
 
 ---
 

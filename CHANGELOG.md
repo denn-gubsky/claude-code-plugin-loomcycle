@@ -4,6 +4,37 @@ All notable changes to this project are documented here. The format follows
 [Keep a Changelog](https://keepachangelog.com/) and the project adheres to
 [Semantic Versioning](https://semver.org/).
 
+## [1.8.0] — 2026-08-15
+
+**Reflect loomcycle v1.52.0 → v1.54.0: the ontology became a hierarchy an agent may
+only suggest to, and stored facts gained evidence, verdicts, and a verbatim answer
+path.** Skills + reference docs only; no new commands or hooks. Version bump
+`1.7.0 → 1.8.0` (`plugin.json` + `marketplace.json`).
+
+### Added
+
+- **The ontology is a type HIERARCHY** (loomcycle v1.52.0): a child chunk is a
+  subclass of its parent, inherits its fields, and a type filter matches subtypes —
+  `type=event` returns `incident` rows.
+- **An agent may SUGGEST a type, never decide one** (v1.53.0): on the ontology
+  document alone a run may only file a `proposed` entity, via `propose_entity`.
+  Everything else there is refused, and resolving a suggestion is an operator action
+  on a surface a run cannot reach.
+- **Verified writes** (v1.54.0) in `reference/document.md` and a paragraph in
+  `SKILL.md`. Three behaviours an agent has to know, none of which are guessable
+  from the tool schema:
+  - **pass `source_quote`** when writing a fact — the span it was drawn from. A fact
+    with no span cannot be verified by anyone later.
+  - **some facts are hidden from you on purpose.** `list_facts`/`graph_recall` omit
+    what a judge refused; `include_refuted: true` reads them back with the reason.
+    An *unjudged* fact is not hidden — unverified and refuted are different states.
+  - **never call `judge_fact` on your own writes.** That is self-certification, and
+    it defeats the mechanism. Leave your facts unjudged, which reads as unverified
+    and is honest.
+  - **prefer `verbatim_answer` for lookup questions**: it returns the stored claim
+    verbatim with its citation and no generated wording. It refuses often and by
+    design — a refusal means "answer normally", not "there is nothing".
+
 ## [1.7.0] — 2026-07-30
 
 **Reflect loomcycle v1.11.1 → v1.42.0, and fix every yaml example in the repo.**
