@@ -210,7 +210,16 @@ Nesting in that document is a **type hierarchy** (v1.52.0): a child chunk is a *
 parent, inheriting its fields, and a type filter on `list_facts`/`query_chunks` matches subtypes too
 — so `type=event` returns `incident` rows. And since v1.53.0 **your agent cannot edit that document**:
 on the ontology alone a run may only file a `proposed` entity, through `propose_entity`, which an
-operator then accepts or rejects. Everything else there is refused. **Full reference:**
+operator then accepts or rejects. Everything else there is refused.
+
+**Verified writes (v1.54.0).** A fact can carry `source_quote` — the span of source text it was
+drawn from — and a judge can be asked whether that span actually carries the claim. A fact that
+fails is **withheld from `list_facts`/`graph_recall`, never deleted** (`include_refuted: true` reads
+it back with the reason). Three things follow for an agent: pass the span when you write a fact;
+never call `judge_fact` on your own writes, which is self-certification; and for a lookup question
+try **`verbatim_answer`** before composing one, which returns the stored claim verbatim with its
+citation, or a reason it will not. It refuses often, and a refusal means "answer normally", not
+"there is nothing". **Full reference:**
 [reference/document.md](reference/document.md).
 
 > ⚠️ **After upgrading the runtime, reload the plugin.** The plugin ships no tool schemas — the thin
