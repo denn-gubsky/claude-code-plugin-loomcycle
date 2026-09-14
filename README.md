@@ -136,6 +136,12 @@ All commands are namespaced under the plugin name: `/loomcycle:<command>`.
 | `/loomcycle:memory <recall\|search\|add\|get\|set\|list> [--scope=agent\|user] [args…]` | `memory` | Inspect/edit an agent's memory: semantic `recall`/`search`, `add` conversation facts, or plain key/value. `add`/`recall` need a memory-layer backend (v0.16). |
 | `/loomcycle:operator-token <create\|rotate\|retire\|get\|list> [--name=<n>] [--tenant=<id>] [--subject=<s>] [--scopes=a,b]` | `operatortokendef` | Mint/rotate/retire per-principal bearer tokens (RFC L multi-tenant auth, loomcycle ≥ v0.17). Operator-admin only; create/rotate show the plaintext **once**. |
 
+**Which MCP tool for what** — the runtime exposes 52 meta-tools and several
+clusters sound alike (`spawn_run` vs `spawn_runs`, `register_agent` vs
+`agentdef`, `subscribe_channel` vs `peek_channel`+`ack_channel`,
+`get_snapshot` vs `export_snapshot`). See **[reference/mcp-tools.md](reference/mcp-tools.md)**
+for the map, the traps, and which tools an admin-only token is needed for.
+
 ## Skills
 
 Skills load automatically when their description matches what you're doing:
