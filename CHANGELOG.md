@@ -4,6 +4,47 @@ All notable changes to this project are documented here. The format follows
 [Keep a Changelog](https://keepachangelog.com/) and the project adheres to
 [Semantic Versioning](https://semver.org/).
 
+## [1.9.0] — 2026-09-14
+
+**A map of the MCP tool surface.** Docs only; no command, skill or hook changes,
+and no runtime requirement beyond 1.4.0's. Version bump `1.8.0 → 1.9.0`
+(`plugin.json` + `marketplace.json`).
+
+### Added
+
+- **`reference/mcp-tools.md`** — which of the runtime's 52 meta-tools to reach
+  for, and which not. The plugin ships no tool definitions (`.mcp.json` wires
+  the `--upstream` thin client, which forwards every `tools/list` to the
+  runtime), so this is deliberately a MAP rather than a copy of the
+  descriptions: duplicating them here would go stale on the next runtime patch
+  and then disagree with what a session is actually holding.
+
+  It covers the clusters where two names sound alike and the traps that cost a
+  wasted call — `spawn_run` vs `spawn_runs` (N parallel calls do *not* fan out,
+  one MCP connection serializes them), `register_agent` vs `agentdef` (a TTL
+  scratch agent vs a durable versioned one, and **a def is not live until
+  promoted**), `subscribe_channel` vs `peek`+`ack` (at-most-once vs
+  at-least-once), `get_snapshot` vs `export_snapshot` (read vs move),
+  `a2aservercarddef` vs `a2aagentdef` (advertises *us* vs registers a peer *we*
+  call), `path rm` (removes the NAME, not the thing), and `volumedef`
+  `delete` vs `purge` (keeps the files vs deletes the tree).
+
+- **Which tools your token can reach.** Twelve are admin-only and a
+  `substrate:tenant` session does not merely get refused — it never sees them in
+  `tools/list`. A tool that looks "missing" is usually that, not a broken
+  runtime. Includes the two that read oddly: `list_channels` is admin-only while
+  `channel op=list_channels` is its tenant-confined twin, and `directory` is
+  reachable for a tenant while its `op=tenants` sub-op is not.
+
+### Notes
+
+- Every tool name on the page was checked against the live surface rather than
+  written from memory; the admin/tenant split was read from the runtime's
+  authorization map, not from prose.
+- The companion runtime change (loomcycle) rewrites all 52 descriptions to state
+  their boundaries. This page needs no edit when that ships — the thin client
+  picks the new text up automatically.
+
 ## [1.8.0] — 2026-08-15
 
 **Reflect loomcycle v1.52.0 → v1.54.0: the ontology became a hierarchy an agent may
