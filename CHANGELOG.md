@@ -4,6 +4,102 @@ All notable changes to this project are documented here. The format follows
 [Keep a Changelog](https://keepachangelog.com/) and the project adheres to
 [Semantic Versioning](https://semver.org/).
 
+## [1.10.0] — 2026-10-08
+
+**Brought up to loomcycle v1.107.0.** The plugin was last grounded around
+v1.54.0 (the tool map at v1.78.0); the runtime has since gone from 52 to 54 MCP
+tools, removed three, and tightened who may call which. Three new commands, one
+new reference page, every existing command, skill and reference page checked
+against the v1.107.0 source. Version bump `1.9.0 → 1.10.0` (`plugin.json` +
+`marketplace.json`).
+
+### Fixed
+
+- **Tool names: the pre-approvals and both hooks never matched under the
+  plugin's own server.** Claude Code names a plugin-provided MCP tool
+  `mcp__plugin_loomcycle_loomcycle__<tool>`, and every `allowed-tools` line and
+  both hook matchers named `mcp__loomcycle__<tool>`, which is what a server a
+  project registers by hand gets. Every `allowed-tools` line now lists both
+  forms, the hook matchers accept both, and body text names a tool by its bare
+  name.
+- **Statements that were no longer true:**
+  - an interactive run *can* be started over MCP (`interactive: true` on
+    `spawn_run` / `spawn_runs`), and any running run can be made interactive
+    with `retune_run`. Steering itself still has no MCP tool;
+  - `spawn_runs` `mode: "detach"` is supported, not "reserved and rejected";
+  - `list_runs` takes `user_id` **or** `walk_id`; `get_run` takes `run_id` or
+    `agent_id`;
+  - `operatortokendef create` no longer defaults to `substrate:admin`. An
+    omitted scope list is refused;
+  - memory `recall` replies `{memories: […]}`, not `{facts: […]}`; `search`
+    replies `{entries: […]}`;
+  - the hook registry (`register_hook`, `list_hooks`, `delete_hook`,
+    `/v1/hooks`) was removed in v1.97.0;
+  - Volumes shipped in v1.1.0 (there is no v1.0.3), and `loomcycle validate` no
+    longer needs a `defaults:` block;
+  - the three deployment profiles that set `LOOMCYCLE_READ_ROOT` / `WRITE_ROOT`
+    / `BASH_CWD` would not start. They now use `volumes:`;
+  - Bash does not work in the default Docker image, which is distroless. The
+    containerized profile now uses the toolbox image;
+  - `fallback_on_error` has no default of `true`; an unknown `user_tier` is
+    refused, not mapped to `default`; `deepseek-v4-flash` is `deepseek-flash`;
+  - the SSE event names in the interactive reference were not loomcycle's, and
+    its "cancel" route was the one that discards a draft run;
+  - several environment variables listed did not exist, and the document
+    reference gave the wrong default scope and hop limit.
+
+### Added
+
+- **`/loomcycle:decide`** — ask a decision model a choice, a yes/no or a score
+  about text you supply (the `decision` tool, loomcycle ≥ v1.107.0).
+- **`/loomcycle:review`** — approve, send back with feedback, or reject a run
+  whose answer is held for review (`review_run`, ≥ v1.93.0).
+- **`/loomcycle:retune`** — change a running agent's model, bounds or mode
+  without sending it a message (`retune_run`, ≥ v1.83.0).
+- **`/loomcycle:run`** gained `--interactive` and `--review` (started detached,
+  so the session is not held open), `--max-wall`, `--key` (idempotent start),
+  and the per-run overrides: routing, bounds, sampling, forced tool choice and
+  a structured answer schema.
+- **`/loomcycle:fanout --detach`** and **`/loomcycle:runs --walk=<run_id>`**.
+- **`reference/mcp-tools.md`** rewritten for 54 tools: the run-control cluster
+  (`configured_run`, `retune_run`, `review_run`, steering,
+  `interruption_resolve`), teams, hook definitions, decisions, people and their
+  data, and **which token reaches which tool** — since v1.107.0 an MCP session
+  is held to its token's scopes, and a tool the token may not call is absent
+  from the list. It also points at the runtime's own manual
+  (`context op=help`), which matches the version you are connected to.
+- **README: "Which token to give the plugin"**, and troubleshooting entries for
+  a missing tool, stale schemas after an upgrade, and a run that never returns.
+- **`reference/hooks.md`** in the configure skill — agent hooks and hook
+  definitions.
+- The configure skill covers model kinds and the `decision:` block, the
+  `context:` block, `tool_choice` / `output_format`, the memory reranker,
+  measured timeouts, presets and config layering, review holds and retune,
+  runtime MCP server registration rules, and a "things that fail silently"
+  checklist. Its environment-variable catalogue gained the variables added
+  since v1.54 and lost the ones that are gone.
+- The memory skill covers `recall`'s time predicates and source turns, the
+  `placement` op, chat `history`, the full 47-op document catalogue (search,
+  backlinks, tags, version history, canvas, federation, `remember`), and paged
+  `path ls`.
+
+### Changed
+
+- **`/loomcycle:memory` defaults to `--scope=user`**, not `agent`. Called from
+  the IDE there is no agent run, so `agent` is the MCP session's own synthetic
+  keyspace rather than a named agent's memory.
+- The plugin's version no longer claims to track loomcycle's. Each release
+  names the loomcycle tag it was checked against.
+
+### Notes
+
+- Checked against a checkout of the loomcycle **v1.107.0** tag: tool names,
+  schemas and the authorization map were read from source, and the YAML
+  examples added to the routing reference were validated with a v1.107.0
+  binary. Nothing here was exercised against a live runtime.
+- Claims that could not be confirmed in source were removed or left as they
+  were rather than corrected by guess.
+
 ## [1.9.0] — 2026-09-14
 
 **A map of the MCP tool surface.** Docs only; no command, skill or hook changes,

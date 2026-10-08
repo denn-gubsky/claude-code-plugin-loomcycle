@@ -1,6 +1,6 @@
 ---
 name: loomcycle-configure
-description: Configure a loomcycle runtime — providers, model tiers, user tiers, fallbacks, per-agent sampling and context-compaction, environment variables, deployment profiles (brew/in-system, containerized, true sandbox, server, multi-tenant, cloud), filesystem Volumes, the Bashbox in-process sandbox, the Path VFS, chunked-graph Documents, encrypted per-tenant credentials (CredentialDef / $cred: / provider-key override), per-scope token budgets and usage/cost attribution, inbound webhooks, and third-party MCP servers. Use when the user wants to set up or tune loomcycle.yaml or its env, pick a deployment posture, wire provider routing/cost-cascades, gate plans, tune decoding (temperature/top_p) or compaction, lock down tool/sandbox/auth, enable or choose between Bash and the Bashbox sandbox (incl. its host-command fallback), name resources with Path, author chunked-graph Documents (and the SQL Memory they require), store tenant/user API keys or bring-your-own provider keys, set token budgets, receive webhooks, or connect external MCP tools.
+description: Configure a loomcycle runtime — providers, model tiers and aliases, model kinds (chat / decision / embedder) and decision models, user tiers, fallbacks, per-agent sampling, context retention and compaction, agent hooks and hook definitions, interactive runs and review holds, environment variables, deployment profiles (brew/in-system, containerized, true sandbox, server, multi-tenant, cloud), filesystem Volumes, the Bashbox in-process sandbox, the Path VFS, chunked-graph Documents, encrypted per-tenant credentials (CredentialDef / $cred: / provider-key override), per-scope token budgets and usage/cost attribution, inbound webhooks, and third-party MCP servers. Use when the user wants to set up or tune loomcycle.yaml or its env, pick a deployment posture, wire provider routing/cost-cascades, gate plans, tune decoding (temperature/top_p), context retention or compaction, add a decision model, gate an agent's tool calls with hooks, make runs interactive or hold their answers for review, lock down tool/sandbox/auth, enable or choose between Bash and the Bashbox sandbox (incl. its host-command fallback), name resources with Path, author chunked-graph Documents (and the SQL Memory they require), store tenant/user API keys or bring-your-own provider keys, set token budgets, receive webhooks, or connect external MCP tools.
 allowed-tools: Read Write Edit Bash(loomcycle validate*) Bash(loomcycle doctor*) Bash(loomcycle init*)
 ---
 
@@ -12,6 +12,8 @@ configuration along one seam — keep it in mind throughout:
 
 - **`loomcycle.yaml` owns routing** — `provider_priority`, `tiers`, `models:`
   aliases, `user_tiers:` overlays, `agents:` overrides. Declarative model policy.
+  It can be split and stacked: embedded presets (`LOOMCYCLE_PRESETS`), a config
+  directory, and repeatable `--config` files merge left to right, last wins.
 - **Environment owns posture** — tool sandbox roots, the auth token, storage
   backend, multi-tenant pepper, replica id, observability. *How* and *where* it
   runs.
@@ -32,20 +34,21 @@ The six deployment profiles the operator may ask about are points on a
 2. **Never put a secret value in `loomcycle.yaml` or any file.** API keys and
    `LOOMCYCLE_AUTH_TOKEN` are referenced by **env-var name** only. The yaml
    never holds a key.
-3. **Tools are default-deny — in *two* layers.** (a) The built-ins
+3. **Tools are gated in *two* layers.** (a) The built-ins
    `Read`/`Write`/`Edit`/`Bash`/`HTTP`/`WebFetch` refuse every call until their
-   *operator* root/allowlist env var is set. (b) The capability tools
-   `Memory`/`Channel`/`AgentDef`/`ScheduleDef`/… additionally refuse until the
-   *agent* carries an explicit scope list (`memory_scopes`, `channels:`,
-   `agent_def_scopes`, …) — having the tool in `tools` is necessary but
-   **not sufficient**. An agent sees `operator-enabled ∩ tools ∩
-   per-tool-scope`. Recommend the *narrowest* setting that works at every layer;
-   never widen "to make it work." *(v0.23.3 (F21/#389), loomcycle emits a boot
-   `WARNING:` when a tool is in `tools` but its gate is unset — `Memory`
-   w/o `memory_scopes`, `Channel` w/o `channels`, `Evaluation` w/o
-   `evaluation_scopes`, `Interruption` w/o `interruption.enabled` — so this
-   silent default-deny is now visible at startup, surfaced in `cfg.Warnings` /
-   `loomcycle validate`.)*
+   *operator* volume/allowlist is set. (b) The capability tools additionally need
+   a per-agent grant, and having the tool in `tools` is necessary but **not
+   sufficient**: `Channel` needs `channels:`, `Interruption` needs
+   `interruption.enabled`, and the definition-authoring tools (`AgentDef`,
+   `ScheduleDef`, …) need their `*_def_scopes` list. An agent sees
+   `operator-enabled ∩ tools ∩ per-tool grant`. Since v1.82–v1.83 four grants are
+   no longer deny-when-unset: an unset `memory_scopes` resolves to the caller's
+   **own** data (`user`, plus `tenant` for a non-isolated member), `history_scope`
+   to `user`, `sql_scopes` to `[user]`, and `evaluation_scopes` to
+   `[submit_self]`. To grant none: in a static agent (yaml or `.md`), leave the tool out of `tools:` — `["-*"]` there fails config load. On an `AgentDef` create/fork overlay, `["-*"]` is accepted and grants nothing. Recommend the *narrowest*
+   setting that works at every layer; never widen "to make it work."
+   `loomcycle validate` and `doctor` print an advisory for each gate an agent's
+   tools would hit.
 4. **Bash is not a sandbox.** It is cwd-restricted + env-scrubbed only. If Bash
    is exposed to untrusted prompts, the runtime **must** be containerized — say
    so explicitly.
@@ -96,11 +99,78 @@ Profiles are cumulative: 5 builds on 4, 6 builds on 5. Read the matching section
 of [reference/profiles.md](reference/profiles.md) before emitting config — each
 lists the exact env set, the yaml shape, and the sharp edges.
 
-## Volume primitive (RFC AH) — v1.0.3+
+## Things that fail silently — check these first
 
-**RFC AH replaces the env-var file jail with a `volumes:` block in `loomcycle.yaml`.** The old
+Four mistakes load clean and then do the wrong thing. Look for them before
+anything else when "it validates but does not work":
+
+- **`allowed_tools:` instead of `tools:`.** The old key is ignored, `validate`
+  prints `OK`, and the agent gets an empty allowlist: no tools at all.
+- **A capability tool with no grant.** `Channel` without `channels:`,
+  `Interruption` without `interruption.enabled`, a `Memory` scope the agent was
+  not given. `loomcycle validate` and `doctor` print an advisory for each gate;
+  read them.
+- **An untagged decision model or embedder.** A `models:` alias used by the
+  `decision:` block or `memory.embedder` should carry `kind: decision` /
+  `kind: embedder`. Untagged still loads, with a warning; a wrong tag fails the
+  load.
+- **A change that needs a restart.** `POST /v1/_config/reload` applies most
+  routing live and lists what it could not under `restart_required` (the memory
+  embedder, skills, the `decision:` block, among others).
+
+## Model kinds and decision models — v1.107.0+
+
+A `models:` alias can say what the model is for: `kind: chat` (the default),
+`kind: decision` or `kind: embedder`. The kind is a check on **where an alias may
+be written**, never a routing input.
+
+A **decision model** answers typed questions (a choice, a yes/no, a score) about
+text, with probabilities, for a few tokens. It is declared as an alias and listed
+in a `decision:` block:
+
+```yaml
+models:
+  decide: { provider: ollama-local, model: nimble, kind: decision }
+
+decision:
+  default: decide        # the model a call gets when it names none
+  timeout_ms: 30000      # must cover a model reload on a shared GPU
+  max_concurrent: 4      # per provider
+```
+
+Without a `decision:` block the capability does not exist: the tool is not
+offered and every call answers `decision_not_configured`. Today only Ollama
+(0.35 or later) serves decision models. An agent uses one by listing `Decision`
+in its `tools:`; from the IDE it is `/loomcycle:decide`. **The probabilities are
+not calibrated** — say so before an operator gates on a threshold.
+**Full reference:** [reference/routing.md](reference/routing.md).
+
+## Agent hooks — v1.94.0+ (the registry removed in v1.97.0)
+
+A hook is a webhook or a JavaScript body an agent's definition carries, called
+around a tool call (`pre`, `post`, `post_failure`) or at a point in the run
+(`agent_start`, `agent_stop`, `run_end`, …). It can check, rewrite, deny, or
+hold an answer for a person. Hooks are attached **on the agent** (per tool, or
+agent-wide), by naming a reusable hook definition (`hookdef`) or inline as a
+webhook. **A security check must be `fail_mode: closed`.** The old global
+`register_hook` / `/v1/hooks` registry no longer exists.
+**Full reference:** [reference/hooks.md](reference/hooks.md).
+
+## Runs that wait for a person — interactive, review, retune
+
+Three run controls an operator sets per agent or per run. An **interactive** run
+parks at each turn boundary to be steered; a run under **review** holds its
+finished answer for a verdict; a **retune** changes a running agent's model or
+bounds without sending it a message, and can turn either mode on for a run that
+is already going. From the IDE these are `/loomcycle:run --interactive`,
+`/loomcycle:steer`, `/loomcycle:review` and `/loomcycle:retune`.
+**Full reference:** [reference/interactive.md](reference/interactive.md).
+
+## Volume primitive — v1.1.0+
+
+**The Volume primitive replaces the env-var file jail with a `volumes:` block in `loomcycle.yaml`.** The old
 vars `LOOMCYCLE_READ_ROOT`, `LOOMCYCLE_WRITE_ROOT`, and `LOOMCYCLE_BASH_CWD` are **retired
-(Phase 3 — fatal config-load error in v1.0.3+)**. Remove them from env files before upgrading.
+(a fatal config-load error since v1.1.0)**. Remove them from env files before upgrading.
 
 ### Quick migration (most configs)
 
@@ -124,23 +194,11 @@ volumes:
 
 Agents can provision volumes at runtime with `VolumeDef op=create`. Two gates required:
 
-1. `volume_def_scopes: [any]` on the agent (per-agent capability gate)
-2. A `dynamic_root: true` volume in `volumes:` (backing store for provisioned volumes)
+1. `volume_def_scopes` on the agent: `[any]`, or `[named:<volume>]` (per-agent capability gate)
+2. A `dynamic_root: true` volume declared in `volumes:` (backing store for provisioned volumes)
 
 `ephemeral: true` makes the volume auto-purge when the creating run ends — no `rm -rf` needed.
-Sub-agents inherit the dispatcher's volumes via spawn narrowing; address files with `volume="name"`.
-
-### `defaults:` block — required for `loomcycle validate`
-
-```yaml
-defaults:
-  provider: deepseek
-  model:    deepseek-v4-pro
-```
-
-`loomcycle validate` uses a static dry-run resolver — it errors `no provider resolved` unless a
-`defaults:` block is present. **Inert at runtime** (the tier resolver ignores it). Add it to every
-config so `validate` works without a live provider environment.
+A sub-agent that declares no volumes inherits its parent's; one that declares its own gets the intersection, with `ro` winning. Address files with `volume="name"`.
 
 **Full reference:** [reference/volumes.md](reference/volumes.md) — migration table, field reference,
 VolumeDef op catalogue, spawn narrowing, validation errors.
@@ -156,7 +214,7 @@ prompts or read-only work;** use `Bash` only when an agent needs a real host bin
 deployment). An operator can allowlist specific host commands gbash lacks (`git`, `gh`) to fall
 through to the host shell via `LOOMCYCLE_BASHBOX_FALLBACK_COMMANDS` (off by default; only those names
 escape; rw-only; creds via `LOOMCYCLE_BASHBOX_FALLBACK_ALLOWED_ENV` injected into the host child
-only). Bashbox is **in-band only** — there is no `mcp__loomcycle__bashbox` meta-tool.
+only). Bashbox is **in-band only** — there is no `bashbox` meta-tool.
 **Full reference:** [reference/bashbox.md](reference/bashbox.md).
 
 ## Path — a Unix-like VFS (RFC AL) — v1.4.0+
@@ -166,20 +224,21 @@ over a `dirents` inode/dirent table. Six ops (`resolve`/`ls`/`stat`/`mkdir`(no-o
 scope-aware (`agent`/`user`/`tenant`), `..` rejected, tenant-isolated. **Gate: `tools:
 [Path]`** — no env flag, no separate scope policy (a dirent is a name, not an authority grant).
 Resources opt into a name via `Memory.set path:` / `VolumeDef.create mount_at:` /
-`Document.create_document path:`. **Also a direct MCP meta-tool** — call `mcp__loomcycle__path`
+`Document.create_document path:`. **Also a direct MCP meta-tool** — call `path`
 from the plugin without spawning a run (scope + tenant resolved server-side from the principal).
 **Full reference:** [reference/path.md](reference/path.md).
 
 ## Document — chunked-graph documents (RFC AK) — v1.4.0+
 
 `Document` is a tree of **chunks** (UUID, hierarchy, type, fields, edges, Markdown body) that agents
-and humans co-author. Bodies live in Memory; structure lives in **SQL Memory** (queryable). ~24 ops
-(document/chunk lifecycle, edges, `query_chunks`, type defs, image assets, Markdown round-trip, and
-the entity tier below), optimistic `revision` concurrency, atomic + orphan-free deletes. **Two
+and humans co-author. Bodies live in Memory; structure lives in **SQL Memory** (queryable). Its ops cover
+the document and chunk lifecycle, links and backlinks, tags, version history, type defs, image assets,
+search, Markdown and canvas round-trips, federation with a peer loomcycle, and the entity tier below;
+optimistic `revision` concurrency, atomic + orphan-free deletes. **Two
 gates: `tools:[Document]` AND `LOOMCYCLE_SQLMEM_ENABLED=1`** (the structure tables live in SQL
 Memory — the #1 "Document refused" cause). Scope `agent`/`user`/**`tenant`** (v1.41.0+ — tenant is
 shared across the tenant and needs `tenant` in **both** `memory_scopes` and `sql_scopes`, since a
-document spans both planes). **Also a direct MCP meta-tool** — `mcp__loomcycle__document`.
+document spans both planes). **Also a direct MCP meta-tool** — `document`.
 **Full reference:** [reference/document.md](reference/document.md).
 
 ## Entity memory — bi-temporal facts + the tenant ontology — v1.42.0+
@@ -190,7 +249,7 @@ extracted twice converges on one chunk instead of accumulating near-duplicates �
 background consolidator needs; it takes no `revision`, and preserves any field you don't restate.
 `supersede_chunk` retires a fact by stamping both end-timestamps and linking the replacement —
 **the retired fact stays readable**, which is the point. `graph_recall` walks the relations
-bidirectionally (≤2 hops) and is time-aware: `as_of` drops facts the store didn't believe at that
+bidirectionally (one hop by default, up to 6) and is time-aware: `as_of` drops facts the store didn't believe at that
 instant.
 
 Two time axes, answering different questions: `valid_at`/`invalid_at` is **world** time (when the
@@ -234,7 +293,7 @@ stores its own provider/search/MCP keys and other Defs reference them **by name*
 server-side so the model never sees a value (`get`/`list` are metadata-only). **One env gate:
 `LOOMCYCLE_SECRET_KEY`** (a base64 32-byte KEK) — **fail-closed**: unset ⇒ the store is disabled and
 nothing is written (the #1 "credential refused" cause). AES-256-GCM + per-tenant HKDF key, AAD
-row-binding, excluded from snapshots. **Direct MCP meta-tool `mcp__loomcycle__credentialdef`** (ops
+row-binding, excluded from snapshots. **Direct MCP meta-tool `credentialdef`** (ops
 `create`/`get`/`list`/`delete`; scope `tenant`/`user`/`agent`, `scope_id` derived from your identity,
 never the wire; tenant-confined). Two consumption paths: **`$cred:<name>`** in an MCPServerDef
 `env:`/`headers:` (per-user outbound channels — each user's own Telegram/Slack token), and a
@@ -260,11 +319,19 @@ not an MCP tool). **Full reference:** [reference/token-limits.md](reference/toke
 - **[reference/routing.md](reference/routing.md)** — providers + API-key env
   vars, the 4-layer resolver precedence, `tiers` / `user_tiers` / `models:`
   aliases / per-agent overrides, `fallback_on_error`, the four cookbook
-  patterns (single/multi provider × single/multi user-tier), and the per-agent
-  `sampling:` (temperature/top_p/…) and `compaction:` blocks. Read this for any
-  routing, decoding, or compaction question.
-- **[reference/volumes.md](reference/volumes.md)** — Volume primitive (RFC AH,
-  v1.0.3+): `volumes:` block fields, per-agent binding, VolumeDef tool + gates,
+  patterns (single/multi provider × single/multi user-tier), model kinds and the `decision:` block, and the
+  per-agent `sampling:` (temperature/top_p/…), `context:` and `compaction:`
+  blocks. Read this for any routing, decoding, decision-model,
+  context-retention or compaction question.
+- **[reference/hooks.md](reference/hooks.md)** — agent hooks: where a hook is
+  attached, the events and what each may decide, hook definitions (`hookdef`),
+  code hooks, fail-open vs fail-closed, secrets and host-widening. Read this for
+  any "gate / check / audit an agent's tool calls" or "hold an answer" question,
+  and when a config still uses the removed `register_hook` registry.
+- **[reference/interactive.md](reference/interactive.md)** — interactive runs
+  and steering, review holds, retune, and what each looks like over MCP and
+  over HTTP.
+- **[reference/volumes.md](reference/volumes.md)** — Volume primitive (v1.1.0+): `volumes:` block fields, per-agent binding, VolumeDef tool + gates,
   ephemeral volumes, spawn narrowing, migration from legacy jail vars, validation
   errors. Read this for any file-tool sandboxing, `VolumeDef`, or Phase 3
   migration question.
@@ -275,17 +342,17 @@ not an MCP tool). **Full reference:** [reference/token-limits.md](reference/toke
   coverage caveats. Read this for any sandboxed-shell or `Bash`-vs-`Bashbox` question.
 - **[reference/path.md](reference/path.md)** — Path primitive (RFC AL, v1.4.0+):
   the dirent model, the six ops, scopes + grammar, how resources opt into a name,
-  the direct `mcp__loomcycle__path` meta-tool, and v1 caveats. Read this for any
+  the direct `path` meta-tool, and v1 caveats. Read this for any
   resource-naming / VFS question.
 - **[reference/document.md](reference/document.md)** — Document primitive (RFC AK,
-  v1.4.0+): chunked-graph documents, the content/structure split, the 13 ops, the
+  v1.4.0+): chunked-graph documents, the content/structure split, the op catalogue, the
   **`LOOMCYCLE_SQLMEM_ENABLED` prerequisite**, optimistic concurrency, atomic
-  deletes, and the direct `mcp__loomcycle__document` meta-tool. Read this for any
+  deletes, and the direct `document` MCP tool. Read this for any
   chunked-document / co-authoring question.
 - **[reference/credentials.md](reference/credentials.md)** — CredentialDef (RFC AR,
   v1.10.0+): the encrypted per-tenant/user secret store, the **`LOOMCYCLE_SECRET_KEY`
   fail-closed gate**, the `create`/`get`/`list`/`delete` ops + scopes, the direct
-  `mcp__loomcycle__credentialdef` meta-tool, and the two consumption paths
+  `credentialdef` meta-tool, and the two consumption paths
   (`$cred:<name>` in MCP env/headers, and the provider-key override by env-var
   name). Read this for any bring-your-own-key / per-user-token / secret-store question.
 - **[reference/token-limits.md](reference/token-limits.md)** — Token budgets (RFC AW,
@@ -301,7 +368,7 @@ not an MCP tool). **Full reference:** [reference/token-limits.md](reference/toke
   variable catalogue (identity/listen, storage, tool sandboxes, providers,
   memory, scheduler/webhooks/A2A, code-js, multi-tenant, observability,
   cluster). Look up any `LOOMCYCLE_*` here before recommending it. Note: three
-  vars are **retired (v1.0.3)** — see the tool-sandboxes section.
+  vars are **retired (v1.1.0)** — see the tool-sandboxes section.
 - **[reference/webhooks.md](reference/webhooks.md)** — inbound webhooks
   (`webhooks:` block — enable, the `enabled`+`delivery` requirement + v0.23.3
   boot-validation, the webhook secret-resolution rules (`LOOMCYCLE_*` auto-allow /

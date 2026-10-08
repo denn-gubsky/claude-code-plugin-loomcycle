@@ -2,7 +2,7 @@
   "hooks": {
     "PostToolUse": [
       {
-        "matcher": "mcp__loomcycle__spawn_run",
+        "matcher": "^mcp__(plugin_loomcycle_)?loomcycle__spawn_run$",
         "hooks": [
           {
             "type": "command",
@@ -11,7 +11,7 @@
         ]
       },
       {
-        "matcher": "mcp__loomcycle__spawn_run|mcp__loomcycle__restore_snapshot|mcp__loomcycle__register_agent|mcp__loomcycle__unregister_agent|mcp__loomcycle__pause_runtime|mcp__loomcycle__resume_runtime",
+        "matcher": "^mcp__(plugin_loomcycle_)?loomcycle__(spawn_run|spawn_runs|restore_snapshot|register_agent|unregister_agent|pause_runtime|resume_runtime)$",
         "hooks": [
           {
             "type": "command",

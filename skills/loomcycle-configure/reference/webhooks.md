@@ -6,21 +6,28 @@ call out to third-party tools). They share one seam — **operator-owned secrets
 referenced by env-var name, never written into the yaml** — but they gate those
 secrets through **two different mechanisms** (webhook secret-resolution rules
 vs. the `${}` interpolation allowlist), which is the #1 thing operators conflate.
-Authoritative source: loomcycle `Context.help input-webhooks` +
-`docs/CONFIGURATION.md` + `internal/api/webhook/allowlist.go` +
-`internal/config/config.go` (verified against loomcycle **v0.23.3** — the
-F23/F24/F28 trigger fixes + the F29/F30 dynamic-substrate fixes; **none are in the
-v0.23.0 brew binary** — see the version notes below). Field names below match the
-config loader.
+Authoritative source: the loomcycle help topics `input-webhooks` and
+`dynamic-mcp` (`Context op=help topic=…`) + `docs/CONFIGURATION.md` +
+`internal/config/config.go` (checked against loomcycle **v1.107.0**). Field names
+below match the config loader. The version notes that mention v0.23.x binaries
+are history; skip them on a current runtime.
+
+> **Not on this page: tool hooks.** A hook that wraps an agent's tool calls or
+> its run is a different feature. It is declared on the agent (`hooks:` at agent
+> level, or `tools: [{name, hooks: {pre, post}}]` per tool) as an inline webhook
+> or a named hook definition authored with the `hookdef` tool. The old
+> registration API (`POST /v1/hooks`, the `register_hook` tool) was removed in
+> v1.97.0. See the `hooks` help topic.
 
 ---
 
 ## Inbound webhooks (`webhooks:` block)
 
 An external system (GitHub, GitLab, Stripe, Linear, Gitea, a CI server, n8n)
-signs and POSTs an event; loomcycle either **spawns an agent run**
-(`delivery: spawn`) or **publishes to a channel** to wake a parked agent
-(`delivery: channel`). Verify-before-parse, fail-loud, retry-safe.
+signs and POSTs an event; loomcycle **spawns an agent run**
+(`delivery: spawn`, the default), **publishes to a channel** to wake a parked
+agent (`delivery: channel`), or **starts a team walk** (`delivery: team`,
+v1.104.0). Verify-before-parse, fail-loud, retry-safe.
 
 ### Enable
 
@@ -28,19 +35,21 @@ signs and POSTs an event; loomcycle either **spawns an agent run**
 LOOMCYCLE_WEBHOOKS_ENABLED=1      # off by default
 ```
 
-The receiver mounts at **`POST /v1/_webhooks/{name}`**. Boot log confirms it:
-`webhooks: enabled (receiver mounted at POST /v1/_webhooks/{name}, env_allowlist=N names)`
-— **watch that `N`**; `env_allowlist=0` means no secret can resolve (see below).
+The receiver mounts at **`POST /v1/_webhooks/{name}`**. The boot log confirms
+it with a line starting `webhooks: enabled (POST /v1/_webhooks/{name} …` that
+reports `env_allowlist=N names` and `unauthenticated_mode=…`. `N` counts the
+explicitly allowlisted and static-declared names; `LOOMCYCLE_*`-named
+verification secrets are auto-allowed on top of it (see below).
 The receiver POST is **not** bearer-gated — the per-def signature *is* the auth.
 Every other `/v1/*` route stays bearer-gated.
 
-### A static def needs `enabled` **and** `delivery`
+### A static def needs `enabled` and a delivery target
 
 ```yaml
 webhooks:
   pr-opened:                       # → POST /v1/_webhooks/pr-opened
     enabled: true                  # REQUIRED — absent/false ⇒ def is inactive ⇒ opaque 404
-    delivery: spawn                # REQUIRED — spawn | channel
+    delivery: spawn                # spawn (default when omitted) | channel | team
     agent: code-reviewer           # spawn target
     auth:
       kind: hmac                   # hmac (default) | bearer
@@ -61,7 +70,8 @@ don't go looking for them there.
 > delivery target can *never* fire is now a **hard `loomcycle validate` / startup
 > error** (not a silent request-time failure): `delivery: spawn` requires `agent`
 > and forbids `channel`; `delivery: channel` requires `channel` and forbids
-> `agent`; an unknown `delivery` or `auth.kind` is rejected. Secret
+> `agent`; `team` / `vars` are allowed only with `delivery: team`; an unknown
+> `delivery` or `auth.kind` is rejected. Secret
 > *resolvability* stays a **non-fatal boot `WARNING:`** (one line per static
 > webhook whose secret won't resolve). On the **v0.23.0 brew binary** these
 > mistakes surface only at request time (404/500). *(A missing `enabled: true` is
@@ -178,15 +188,19 @@ So mapping the root is now optional, but still the clearest way to be explicit
       goal: "$"                    # "$" root ⇒ the entire signed body as JSON (explicit)
 ```
 
-Other mappable targets: `user_id`, `user_tier`, `run_metadata.*`, and
-`user_credentials.<name>` (per-event MCP bearer; spawn only). An absent path
+Other mappable targets: `user_id`, `run_metadata.*`, and
+`user_credentials.<name>` (per-event MCP bearer; spawn only). `user_tier` is
+**not** mappable: it is pinned from the def's own `user_tier:` (v1.9.1), and a
+`payload_mapping` entry for it is ignored. An absent path
 resolves to empty + a trace note — never a hard failure.
 
-> **Security:** `user_id`/`user_tier` MAY come from the signed body (only as
-> trustworthy as the per-def secret), but `tenant_id` comes from the **static
-> def only** — there is deliberately no `payload_mapping` path for it, so an
+> **Security:** `user_id` MAY come from the signed body (only as trustworthy
+> as the per-def secret), but `tenant_id` and `user_tier` come from the **def
+> only** — there is deliberately no `payload_mapping` path for the tenant, so an
 > attacker-influenceable body can't steer the run into another tenant's
-> agents/skills/memory.
+> agents/skills/memory. Through the `webhookdef` tool, `tenant_id` defaults to
+> the author's tenant and may name only that tenant unless the author is an
+> admin; the operator's yaml may name any tenant.
 
 ### Per-tenant route (v0.24.0, RFC N wire change)
 
@@ -195,8 +209,8 @@ A webhook authored under a **non-empty tenant** is reached at
 **`POST /v1/_webhooks/{tenant}/{name}`** — the tenant is path-authoritative,
 resolved from the route, never the body. The bare-root
 **`POST /v1/_webhooks/{name}`** still resolves under the shared `""` tenant, so
-existing single-tenant webhooks are unchanged. The admin `/test` dry-run
-resolves under the caller's principal tenant.
+existing single-tenant webhooks are unchanged. The two triage endpoints take
+the tenant from `?tenant=` (see "Responses & triage").
 
 > **Action for multi-tenant operators:** if you author a webhook under a tenant,
 > register its delivery URL with the `/{tenant}/` prefix at the sender (GitHub,
@@ -219,19 +233,74 @@ These land on the run's `UserCredentials` and substitute into
 webhooks carry no credentials** (no run identity to attach them to) — any
 `user_credentials*` on a `delivery: channel` def is refused at create time.
 
+### After a snapshot restore — `capture_disabled`
+
+A literal `user_credentials` value never travels in a snapshot. A webhook that
+held one is restored with a `capture_disabled` marker listing the stripped keys
+and answers every delivery `404`, whatever its `enabled` flag says. Re-enable it
+with a `fork` whose overlay supplies every listed key (a non-blank
+`user_credentials` value, or a `user_credentials_from_env` variable that is
+allowlisted and set) and sets `enabled: true`. While keys are missing the fork's
+result lists them in `disabled_until_credentials_supplied`, and
+`unusable_credentials` says why a key you named did not count. A fork merges the
+credential maps key by key with the parent's. Schedules behave the same way: a
+restored schedule carrying `capture_disabled` stays disabled until a fork
+re-supplies its keys.
+
+### `delivery: team` — a delivery that starts a team walk (v1.104.0)
+
+```yaml
+webhooks:
+  github-pr-walk:
+    enabled: true
+    delivery: team
+    team: pr-review
+    vars: { repo: "$.repository.full_name", pr: "$.pull_request.number" }
+    auth: { kind: hmac, header: "X-Hub-Signature-256", signing_secret_env: "LOOMCYCLE_GH_WEBHOOK_SECRET", delivery_id_header: "X-GitHub-Delivery" }
+```
+
+A verified delivery starts a detached walk of `team` and answers `202` with the
+walk's `run_id`. `vars` maps variables the team declares to JSONPaths into the
+body; a path the body lacks leaves the variable at the team's default. The
+walk's input is the raw request body. The team is looked up in the webhook's own
+tenant when the delivery arrives.
+
+- Refused on a team webhook: `agent`, `channel`, `user_tier`, credentials,
+  `metadata`, `on_complete`, `sync_response`, and every `payload_mapping` target
+  except `user_id`.
+- A verified delivery that cannot start a walk answers `400 {"error":
+  "invalid_run"}` with no detail; the cause is in the server log and the delivery
+  shows as `rejected_team_start` in recent-deliveries.
+
+A team definition can also declare webhooks of its own (`local.webhooks`),
+reached at `POST /v1/_teams/{tenant}/{team}/webhooks/{name}` (or
+`/v1/_teams/{team}/webhooks/{name}` in the shared tenant). They answer only while
+a walk of that team is running, publish the body into one of the team's own
+channels, and need `LOOMCYCLE_WEBHOOKS_ENABLED=1` like any other.
+
 ### Responses & triage
 
 All outcomes are loud and distinct: `202` (async accept, default; returns
-`{run_id, webhook_name, delivery_id}`) · `200` (sync, if `sync_response.enabled`,
-or an idempotent replay `{deduped:true}`) · `401` sig/auth (no body detail — no
-oracle) · `404` unknown/disabled · `429` rate-limited (`Retry-After`) · `503
-secret_unresolvable` / runtime-unavailable · `400` malformed body/mapping.
+`{run_id, webhook_name, delivery_id}`) · `200` (sync via `?sync=true` when
+`sync_response.enabled`, or an idempotent replay `{deduped:true}`) · `504` sync
+timeout · `401` sig/auth (no body detail — no oracle) · `404` unknown/disabled ·
+`429` rate-limited (`Retry-After`) or token budget spent · `503
+secret_unresolvable` / runtime-unavailable · `400` malformed body/mapping, or
+`400 invalid_run` for a delivery whose agent or team walk cannot start.
 
-Two bearer-authed debug endpoints (the receiver POST itself is unauthed):
+A `delivery: channel` webhook keeps its delivery keys in the database for 24
+hours, so a re-send to any instance or after a restart publishes nothing and
+answers `200` with `deduped`.
+
+Two debug endpoints (the receiver POST itself is unauthed). Both need an
+**admin** bearer (`substrate:admin` or the shared `LOOMCYCLE_AUTH_TOKEN`); a
+`substrate:tenant` token gets 403, even for its own tenant's webhook. Both act on
+the webhook that `/v1/_webhooks/{tenant}/{name}` resolves to, with the tenant
+taken from `?tenant=` (default: the bearer's own tenant):
 
 ```bash
-GET  /v1/_webhooks/{name}/recent-deliveries?limit=50   # delivery_id, verdict, received_at, run_id
-POST /v1/_webhooks/{name}/test                          # dry-run: {would_accept, verdict, run_input_preview} — no run
+GET  /v1/_webhooks/{name}/recent-deliveries?limit=50&tenant=acme   # delivery_id, verdict, received_at, run_id
+POST /v1/_webhooks/{name}/test?tenant=acme                          # dry-run: {would_accept, verdict, run_input_preview} — no run
 ```
 
 Use `/test` to confirm HMAC + payload→goal + agent spawn **before** wiring the
@@ -279,16 +348,9 @@ mcp_servers:
   two filters in series.
 - **http**/**streamable-http** servers are dialed per-call and may *also* be
   registered at runtime via the MCPServerDef substrate
-  (`POST /v1/_mcpserverdef` / the `mcpserverdef` tool, no restart) — mediated by
-  the outbound host allowlist. **stdio** servers are spawned at startup; in yaml
-  they're operator-trusted and need no flag. Runtime-registering a **stdio**
-  server is **gated off by default** (`LOOMCYCLE_MCP_ALLOW_DYNAMIC_STDIO=1`, F31)
-  because it runs an arbitrary local command — **v0.23.3** lifted the old
-  "stdio can't be dynamic" hard rule, but kept it behind that flag.
-  **v0.25.3 (F39)**: a runtime-authored MCP server's inner `${LOOMCYCLE_*}`
-  references are now expanded at create/fork time (same allowlist + deny-list as
-  static yaml), so a dynamically-registered server resolves its own secret env
-  the same way a static one does.
+  (`POST /v1/_mcpserverdef` / the `mcpserverdef` tool, no restart). See
+  "Registering a server at runtime" below. **stdio** servers are spawned at
+  startup; in yaml they're operator-trusted and need no flag.
 - The **server process holds the token** (in its own env); the agent's Bash
   never sees it.
 
@@ -304,6 +366,39 @@ mcp_servers:
 > workaround is to also give such an agent **one native tool** (e.g. `Context`),
 > which puts it in tool-calling mode so the lazy MCP call then dispatches.
 
+### Registering a server at runtime — the `mcpserverdef` rules
+
+Ops: `create`, `fork`, `get`, `list`, `promote`, `retire`, `rediscover`,
+`verify`. Definitions are versioned; `promote` decides which version is served.
+
+- **HTTP and Streamable-HTTP only.** A `stdio` transport is refused, naming the
+  flag, unless the operator set `LOOMCYCLE_MCP_ALLOW_DYNAMIC_STDIO=1` (it runs an
+  arbitrary local command). Yaml stdio servers are unaffected.
+- **The URL's hostname must already be on the operator's outbound allowlist**
+  (`LOOMCYCLE_HTTP_HOST_ALLOWLIST`, or `LOOMCYCLE_HTTP_PRIVATE_HOST_ALLOWLIST`
+  for a private address). A server on an unlisted host is refused at create.
+- **A name already declared in yaml `mcp_servers:` is refused** — yaml is ground
+  truth.
+- **Secrets are stored by reference and resolved when the server is dialed.**
+  The `url` and `headers` are persisted verbatim, so the stored definition keeps
+  `${LOOMCYCLE_N8N_TOKEN}`, never the token.
+- **Only an admin may store a `${NAME}` reference** (v1.101.1). A `${NAME}` in
+  the url, a header, or a stdio server's command/args/env reads the server's own
+  environment, so a `substrate:tenant` token or an agent in a run is refused at
+  `create` / `fork` for any `${NAME}`, including one nested in a default such as
+  `${run.credentials.x:-${LOOMCYCLE_Y}}`. A `substrate:admin` token, open mode
+  and the stdio `loomcycle mcp` count as the operator. Everyone else passes a
+  credential as `${run.credentials.<name>}` (supplied by the run) or
+  `$cred:<name>` (stored with the `credentialdef` tool; see `credentials.md`).
+  `${run.user_bearer}`, `${run.tenant_id}` and `${run.root_run_id}` stay allowed.
+- **Older definitions holding a `${NAME}` with no recorded admin author are
+  "unattributed".** They still dial, with a `WARNING:` line at boot and on first
+  dial. Set `LOOMCYCLE_MCP_REFUSE_UNATTRIBUTED_ENV=1` to refuse to dial them now;
+  the runtime's own help says a future release refuses them by default. To keep
+  one, an admin re-saves it (`create` with the same overlay); otherwise retire it.
+- **Registering publishes the tools; it does not grant them.** The agent's
+  `tools:` list still has to name them.
+
 ### Secret injection — gate #2: the `${}` interpolation allowlist
 
 `${VAR}` in a yaml string expands **only** for an allowlisted name. Everything
@@ -312,12 +407,16 @@ string `${GITEA_ACCESS_TOKEN}` and `401`s on every call. The allowlist (from
 `config.go::ExpandEnvAllowed`) is:
 
 - **any `LOOMCYCLE_`-prefixed name** (the project's own namespace), plus
-- the hardcoded third-party set: **`BRAVE_API_KEY`, `GITHUB_TOKEN`,
-  `SLACK_BOT_TOKEN`, `REDIS_URL`** — and nothing else.
+- the hardcoded third-party set: **`BRAVE_API_KEY`, `SERPER_API_KEY`,
+  `EXA_API_KEY`, `TAVILY_API_KEY`, `GITHUB_TOKEN`, `SLACK_BOT_TOKEN`,
+  `REDIS_URL`, `SANDBOX_AUTH_TOKEN`** — and nothing else.
 
 > **Deny-list (v0.32.0, #462 / exp7-C2) — overrides the allowlist:** `PG_DSN`,
-> `LOOMCYCLE_PG_DSN`, and `LOOMCYCLE_AUTH_TOKEN` are **never** interpolated, even
-> though the `LOOMCYCLE_` prefix would otherwise allow the latter two — they are
+> `LOOMCYCLE_PG_DSN`, `LOOMCYCLE_SQLMEM_PG_DSN`, `LOOMCYCLE_AUTH_TOKEN`,
+> `LOOMCYCLE_OPERATOR_TOKEN_PEPPER`, `LOOMCYCLE_MCP_UPSTREAM_TOKEN`,
+> `LOOMCYCLE_OTEL_EXPORTER_OTLP_HEADERS`, `LOOMCYCLE_SECRET_KEY` and
+> `LOOMCYCLE_SECRET_KEY_PREVIOUS` are **never** interpolated, even
+> though the `LOOMCYCLE_` prefix would otherwise allow most of them — they are
 > loomcycle's own DB/admin credentials, and expanding them into an outbound MCP
 > URL/header would leak infra creds to a third party. (Earlier drafts of this doc
 > listed `PG_DSN` as allowlisted — it is not, and is now explicitly denied.) An
@@ -354,6 +453,10 @@ yaml-load (the `.` can't match the `${}` name regex, so they survive verbatim)
       Authorization: "Bearer ${run.credentials.gitea:-${LOOMCYCLE_GITEA_TOKEN}}"
 ```
 
+With no fallback, a run that does not carry the credential has the **call
+refused** (v1.82.0) — the request is never sent anonymously. The same holds for
+an unresolved `$cred:<name>` in a header.
+
 ---
 
 ## Quick gotcha table
@@ -366,6 +469,11 @@ yaml-load (the `.` can't match the `${}` name regex, so they survive verbatim)
 | webhook → `503 unauthenticated_mode_disabled` | `auth.kind: none` without the opt-in | set `LOOMCYCLE_WEBHOOKS_ALLOW_UNAUTHENTICATED=1` (only on a private listen surface) |
 | spawned agent gets an **empty** task | **v0.23.0 binary** with no `payload_mapping.goal` (v0.23.3 F28 defaults to the raw body) | upgrade, or add `payload_mapping: { goal: "$" }` |
 | MCP server `401`s; header shows literal `${FOO}` | non-allowlisted `${}` name | rename secret to `LOOMCYCLE_*` and map it: `FOO: "${LOOMCYCLE_FOO}"` |
+| `mcpserverdef` `create` refused for a `${NAME}` in url/headers | the author is not an admin | use `${run.credentials.<name>}` or `$cred:<name>`, or have an admin save it |
+| `mcpserverdef` `create` refused on the URL's host | hostname not on `LOOMCYCLE_HTTP_HOST_ALLOWLIST` | the operator adds the host to the allowlist |
+| MCP tool call refused, naming a missing credential | the run carries no `${run.credentials.<name>}` and the header has no `:-` fallback | supply the credential on the run, or add a fallback |
+| restored webhook answers `404` though `enabled: true` | `capture_disabled` after a snapshot restore | `fork` it, re-supplying every stripped credential key |
+| webhook `/test` or `recent-deliveries` → 403 | caller is not an admin | use an admin bearer; pass `?tenant=` for a tenant-owned webhook |
 | webhook → `rejected_spawn_setup: unknown agent` (target is an AgentDef/runtime agent) | pre-v0.23.3 webhook-spawn resolver read yaml agents only (F30) | upgrade to **v0.23.3+**, or declare the target as a static `agents:` yaml entry |
 | "notifier" agent reports success but **nothing is sent**; its `tools` is only `mcp__server__*` | pre-v0.23.5 didn't advertise dynamic-MCP tools, so the call was emitted as text, never dispatched (F33) | upgrade to **v0.23.5+**, or give the agent one native tool (e.g. `Context`) to enter tool-calling mode |
 | external sender can't reach the receiver | `LISTEN_ADDR=127.0.0.1` | bind a reachable IP (tailnet IP for a tailnet sender; no relay needed) |

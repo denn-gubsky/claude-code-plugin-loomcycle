@@ -4,17 +4,26 @@ This file is loaded by Claude Code on every session in this repo. Read it cold; 
 
 ## Project context
 
-**claude-code-plugin-loomcycle** is the Claude Code-side UX layer for [loomcycle](https://github.com/denn-gubsky/loomcycle), a high-load agentic runtime. It is a **Claude Code plugin** — a git-distributed bundle of slash commands, skills, hooks, and a pre-wired MCP server config. It ships nothing executable of its own: since 0.21.0 it wires `loomcycle mcp --upstream <base_url>` as a **thin client** — a stdio↔`/v1/_mcp` proxy to a running loomcycle runtime that boots NO runtime of its own (loomcycle RFC R single-runtime invariant) — and exposes its meta-tools (`mcp__loomcycle__spawn_run`, `…__cancel_run`, `…__list_runs`, snapshot ops, `…__evaluation`, `…__agentdef`, `…__volumedef`, etc.).
+**claude-code-plugin-loomcycle** is the Claude Code-side UX layer for [loomcycle](https://github.com/denn-gubsky/loomcycle), a high-load agentic runtime. It is a **Claude Code plugin** — a git-distributed bundle of slash commands, skills, hooks, and a pre-wired MCP server config. It ships nothing executable of its own: since 0.21.0 it wires `loomcycle mcp --upstream <base_url>` as a **thin client** — a stdio↔`/v1/_mcp` proxy to a running loomcycle runtime that boots NO runtime of its own (loomcycle RFC R single-runtime invariant) — and exposes its meta-tools (`spawn_run`, `cancel_run`, `list_runs`, snapshot ops, `evaluation`, `agentdef`, `volumedef`, etc.).
 
-**Current loomcycle version: v1.42.0.**
+**Grounded against loomcycle v1.107.0** (54 MCP tools). The authoritative lists are in the runtime: `internal/api/mcp/tools.go` (names, descriptions, schemas) and `internal/api/mcp/toolauthz.go` (which token reaches which tool).
+
+> ⚠️ **Tool names carry the plugin prefix.** Claude Code names a plugin-provided MCP tool `mcp__plugin_<plugin>_<server>__<tool>`, so with this plugin's own server the tools are `mcp__plugin_loomcycle_loomcycle__<tool>`. A project that registers the server itself under the name `loomcycle` gets `mcp__loomcycle__<tool>`. Every `allowed-tools` line lists **both** forms and every hook matcher accepts both (`^mcp__(plugin_loomcycle_)?loomcycle__…$`). Until 1.10.0 only the short form was listed, so the pre-approvals and both hooks never matched under the plugin's own server. In body text, name a tool by its bare name.
 
 > ⚠️ **The plugin ships NO tool schemas.** `loomcycle mcp --upstream` proxies the runtime's own `tools/list` (generated from each builtin's canonical input schema), and Claude Code caches that **once, at connection** — it is never refreshed mid-session. So after upgrading a deployment, an already-open session keeps the OLD schema: ops the runtime gained still dispatch (string arguments pass straight through) but any argument the cached schema doesn't declare is serialized as a string and the server rejects it (`cannot unmarshal string into Go struct field …`). **Reload the plugin after upgrading the runtime.** This is the failure most likely to be misread as "the plugin's schema is stale" — there is no schema in this repo to fix.
 
 > ⚠️ **Config key rename.** loomcycle v1.13.0 renamed the agent (and `mcp_servers.*`) key `allowed_tools:` → **`tools:`**. The old spelling is **silently ignored** — `loomcycle validate` still prints `OK` while the agent gets an empty allowlist, which fails closed to *no tools at all*. Every yaml example in this repo used the old key until the v1.7.0 pass; keep new examples on `tools:`.
 
-**Documented here (the MCP-reachable + config surface).** The runtime moved from v1.11.1 → v1.42.0 in ~31 minor releases; this repo's skills cover the primitives below. Surface known to be NOT yet documented, listed so nobody assumes coverage: the **History** tool (`mcp__loomcycle__history`, v1.20.0), **TeamDef** orchestration (`mcp__loomcycle__teamdef`, v1.17–1.19), the **sandbox** toolbox (`mcp__sandbox__*`, v1.23–1.24), **client-executed tools** over WebSocket (v1.16.0), **search providers** (v1.15.0), **resident/interactive sub-agents** (v1.26–1.28), the **RFC BM retention sweeper** (v1.32.0), `Context op=capabilities` (v1.34.0), the per-agent **`skills:`** allowlist (v1.14.0), and `{{tool:…}}` prompt expansion (v1.40.0).
-- **RFC AH** (Volume primitive, v1.0.3+): `volumes:` block replaces the legacy jail. `LOOMCYCLE_READ_ROOT/WRITE_ROOT/BASH_CWD` are fatal config-load errors. See `skills/loomcycle-configure/reference/volumes.md`.
-- **RFC AI** (Interactive agentic sessions, v1.1.1): runs can be started with `interactive: true` — they park at `end_turn` awaiting operator steering via `POST /v1/runs/{id}/input`; re-attach via `GET /v1/runs/{id}/stream`. **No MCP tool for steering** — use `/loomcycle:steer` (HTTP). See `skills/loomcycle-configure/reference/interactive.md`.
+**Documented here (the MCP-reachable + config surface).** The runtime moved from v1.54 to v1.107.0 before the 1.10.0 pass; `README.md` and `reference/mcp-tools.md` describe the current surface. Known to be NOT yet documented beyond a line in the tool map, listed so nobody assumes coverage: **team authoring** (`teamdef` graphs, starters, breakpoints, a team's own `local` definitions), **hook bodies** (`hookdef` code-js / webhook contracts), the **sandbox** toolbox and browser images, **client-executed tools** over WebSocket, **search providers**, **resident sub-agents** and poll-mode sub-agents (in-run only), **A2A**, **schedules**, and document **federation** setup.
+
+Three runtime changes that removed or tightened something the plugin used to describe:
+- **v1.107.0** — an MCP session is held to its token's scopes (`runs:create`, `runs:read`, `channel:publish`, `channel:read`); a tool the token may not call is absent from `tools/list`.
+- **v1.97.0** — `register_hook` / `list_hooks` / `delete_hook` and `/v1/hooks` were removed. Hooks live on the agent definition; `hookdef` authors reusable ones.
+- **v1.87.0** — `operatortokendef create` refuses an omitted scope list (it used to mint admin). The request key is `scopes`; `allowed_scopes` is only what the response echoes.
+
+Per-primitive notes from earlier passes (the reference pages are the current statement; these record why each exists):
+- **RFC AH** (Volume primitive, v1.1.0+): `volumes:` block replaces the legacy jail. `LOOMCYCLE_READ_ROOT/WRITE_ROOT/BASH_CWD` are fatal config-load errors. See `skills/loomcycle-configure/reference/volumes.md`.
+- **RFC AI** (Interactive agentic sessions, v1.1.1): runs can be started with `interactive: true` — they park at `end_turn` awaiting operator steering via `POST /v1/runs/{id}/input`; re-attach via `GET /v1/runs/{id}/stream`. `interactive` is now also a `spawn_run` / `spawn_runs` / `retune_run` field, so a run can be started or made interactive over MCP (detached, because `spawn_run` blocks). **Still no MCP tool for steering** — use `/loomcycle:steer` (HTTP). See `skills/loomcycle-configure/reference/interactive.md`.
 - **RFC AA** (SQL Memory, v1.2.0): a per-scope SQL database facet of the `Memory` tool, enabled by `LOOMCYCLE_SQLMEM_ENABLED=1`. The **prerequisite for Documents** (RFC AK stores chunk structure there). Noted in `reference/env-vars.md` + `reference/document.md`.
 - **RFC AJ** (Bashbox, v1.3.0): `Bashbox` — a TRUE in-process gbash sandbox (no OS process, no network, honors `ro` volumes), opt-in via `LOOMCYCLE_BASHBOX_ENABLED=1` + `tools:[Bashbox]`, with an operator host-command fallback. **In-band only — no MCP meta-tool.** See `reference/bashbox.md`.
 - **RFC AL** (Path VFS, v1.4.0): name Memory/Volume/Document resources by paths over a `dirents` table; `tools:[Path]`. **Direct MCP meta-tool `mcp__loomcycle__path`.** See `reference/path.md`.
@@ -47,7 +56,7 @@ A Claude Code plugin is **markdown + JSON files in a git repo** — there is **n
 - `.mcp.json` — bundled MCP server config (the loomcycle stdio server). Lives at the repo root (referenced by `plugin.json`'s `mcpServers` path).
 - `commands/*.md` — slash commands (frontmatter + body; `$ARGUMENTS`, `$1`, `$2` for args).
 - `skills/<name>/SKILL.md` — skills (frontmatter `description` drives auto-invocation).
-- `hooks/hooks.json` — hooks (PostToolUse, matched against `mcp__loomcycle__<tool>`).
+- `hooks/hooks.json` — hooks (PostToolUse, matched against both prefixed forms of a loomcycle tool name).
 
 Distribution: users run `/plugin marketplace add denn-gubsky/claude-code-plugin-loomcycle` then `/plugin install loomcycle`. No npm in the loop.
 
@@ -58,7 +67,7 @@ Distribution: users run `/plugin marketplace add denn-gubsky/claude-code-plugin-
 3. **Feature branch** — `feature-<short>` off `main`. Never commit to `main` directly.
 4. **Code** — small, focused, individually-reviewable commits.
 5. **Validate** — `claude plugin validate .` must pass. JSON files parse under `jq`; every command/skill has valid frontmatter. (`--strict` flags one accepted false-positive: this `CLAUDE.md` is the repo dev guide, not plugin-runtime context — it auto-loads when you develop the repo and is inert for end-users.)
-6. **Tool-name cross-check** — every `mcp__loomcycle__<tool>` reference must match a real tool in loomcycle's `tools.go`. No PREVIEW-only tools.
+6. **Tool-name cross-check** — every tool named in a command, skill or hook must match a real tool in loomcycle's `tools.go` at the tag being grounded against, and every `allowed-tools` line must carry both prefixed forms. No PREVIEW-only tools.
 7. **Self-review** — read the diff cold. No secrets, no dead files.
 8. **PR** — one branch, one PR. Title = what it does, ≤72 chars. Body = why → what → tested.
 9. **Human review** — wait; never self-merge.
@@ -76,8 +85,10 @@ Distribution: users run `/plugin marketplace add denn-gubsky/claude-code-plugin-
 - Commands take operator-friendly named args; they render results as markdown (tables for lists), not raw JSON.
 - Commands/skills are thin: they describe the MCP tool call and the rendering. No logic the runtime should own.
 - `spawn_run` takes `segments` (array), not a `prompt` string — wrap the operator's text as one segment. The `/v1/runs` endpoint is SSE (`text/event-stream`); the MCP thin client handles streaming transparently, but direct HTTP clients must keep the connection open for the run to proceed.
-- `list_runs` requires `user_id` — commands must supply it (from `/loomcycle-connect` state or `--user`).
-- **Versioning tracks loomcycle's vector through the v1.x batch** (not an independent plugin semver). Current version is `v1.1.1`, matching loomcycle. Bump alongside loomcycle's `v0.X.Y` / `v1.X.Y`. Keep `.claude-plugin/plugin.json` + `.claude-plugin/marketplace.json` versions in sync, and tag releases `vX.Y.Z`. `marketplace.json` keeps `ref: main` during development (installs track latest); pin it to the release tag at stable milestones.
+- `list_runs` requires exactly one of `user_id` or `walk_id` — commands must supply one (`user_id` from `/loomcycle:connect` state or `--user`).
+- `spawn_run` blocks for the whole run and has no detached form. Anything that waits for a person (`interactive`, `review`) is started through `spawn_runs` with `mode: "detach"`.
+- Skills, commands and reference pages are read by a model: no RFC letters in new text there. Use the feature name and, where it helps, the version that shipped it.
+- **The plugin has its own semver** (it tracked loomcycle's vector until 1.5.0 and has diverged since: 1.10.0 is grounded against loomcycle v1.107.0). Each release's CHANGELOG entry and README compatibility row name the loomcycle tag it was checked against. Keep `.claude-plugin/plugin.json` + `.claude-plugin/marketplace.json` versions in sync, and tag releases `vX.Y.Z`. `marketplace.json` keeps `ref: main` during development (installs track latest); pin it to the release tag at stable milestones.
 - Commit subjects ≤72 chars, imperative, conventional prefix. Close with `Co-Authored-By` when Claude wrote substantial content.
 
 ## When in doubt

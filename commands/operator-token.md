@@ -1,14 +1,14 @@
 ---
-description: Mint, rotate, retire, or inspect loomcycle OperatorTokenDef bearer tokens — per-principal multi-tenant auth (RFC L, loomcycle ≥ v0.17.0).
+description: Mint, rotate, retire, or inspect loomcycle OperatorTokenDef bearer tokens — per-principal multi-tenant auth.
 argument-hint: "<create|rotate|retire|get|list> [--name=<n>] [--tenant=<id>] [--subject=<s>] [--scopes=a,b] [--def-id=<id>] [--grace=<sec>]"
-allowed-tools: mcp__loomcycle__operatortokendef
+allowed-tools: mcp__loomcycle__operatortokendef mcp__plugin_loomcycle_loomcycle__operatortokendef
 ---
 
 # loomcycle operator-token
 
-Manage the **OperatorTokenDef** substrate (loomcycle ≥ v0.17.0, RFC L OSS
-multi-tenant authorization). Each token binds an **authoritative principal**
-`{tenant_id, subject, allowed_scopes}` resolved *from the token* — it overrides
+Manage the **OperatorTokenDef** substrate (loomcycle's multi-tenant
+authorization). Each token binds an **authoritative principal**
+`{tenant_id, subject, scopes}` resolved *from the token* — it overrides
 the wire `tenant_id` / `user_id`, so per-subject fairness and per-tenant
 isolation become real boundaries. Wraps the `operatortokendef` meta-tool.
 
@@ -22,22 +22,26 @@ isolation become real boundaries. Wraps the `operatortokendef` meta-tool.
   `[a-zA-Z0-9_-]{1,64}`).
 - `--subject=<s>` — authoritative subject (optional on `create`; defaults to
   `tok-<name>`). Becomes the principal's authoritative `user_id`.
-- `--scopes=a,b,c` — comma-separated scopes from the closed catalog (`create`;
-  default `[substrate:admin]`). Pass the narrowest set the token needs.
+- `--scopes=a,b,c` — comma-separated scopes from the closed catalog.
+  **Required for `create`**: an omitted list is refused. It used to default to
+  `[substrate:admin]`, which turned a mistyped key into a full-power token. If
+  the operator gave no scopes, ask which they want; never fill in admin.
 - `--def-id=<id>` — existing def id (target for `get`; alternative target for
   `rotate` / `retire`).
 - `--grace=<sec>` — rotation grace-window override (`rotate`); the old token
   keeps working this long after the new one is minted.
 
-Call `mcp__loomcycle__operatortokendef` with the matching shape; render results
-as markdown, not raw JSON.
+Call the `operatortokendef` tool of the loomcycle MCP server with the matching
+shape; render results as markdown, not raw JSON.
 
 ### `create` — mint a new token
 ```json
 { "op": "create", "name": "<n>", "tenant_id": "<id>",
   "subject": "<s, optional>", "scopes": ["<scope>", …] }
 ```
-Returns the def metadata **plus the token plaintext, shown ONCE**.
+Returns the def metadata **plus the token plaintext, shown ONCE**. The request
+field is `scopes`; the response echoes it as `allowed_scopes`. Sending
+`allowed_scopes` in a request is not the same key and is refused.
 
 ### `rotate` — mint a replacement, old token valid during the grace window
 ```json
@@ -68,15 +72,44 @@ plaintext back:
 4. It is the secret `LOOMCYCLE_AUTH_TOKEN`-class bearer for that principal —
    treat it like any `*_TOKEN`.
 
-For `--scopes`, pass the **narrowest** set: a per-app key might be
-`runs:create`; only an admin/operator key needs `substrate:admin`. Default-deny
-— omitted scopes are not granted.
+## The scope catalogue
 
-## Static alternative — declared principals (RFC AO)
+The catalogue is closed; an unknown name is refused. Scopes are bound at mint
+time, so authorising differently means minting a new token and retiring the old
+one.
+
+| Scope | Grants |
+|---|---|
+| `substrate:admin` | Everything, including minting tokens, snapshots and pausing the runtime. Satisfies every other scope. |
+| `substrate:tenant` | Full power **inside one tenant**: runs, channels, and authoring every definition kind. Implies the four `runs:*` / `channel:*` scopes and `providers:operator-key`. No operator plane. |
+| `substrate:user` | An **isolated member**: confined to its own user scope and its own runs. Implies `runs:create` and `runs:read`, and nothing tenant-shared. |
+| `runs:create` | Start runs, and every write on a run: cancel, compact, retune, review, steer, resolve an interruption, run a team, ask a decision model. |
+| `runs:read` | Read and list runs, and watch run state. |
+| `channel:publish` | Publish to a channel and acknowledge a cursor. |
+| `channel:read` | Subscribe to and peek a channel. |
+| `providers:operator-key` | Lets a run fall back to the operator's own provider API key. Matters only where the operator turned key restriction on; omit it to make a tenant bring its own key. |
+
+Pass the **narrowest** set. Omitted scopes are not granted.
+
+**What a token for this plugin needs.** The plugin's commands map to scopes one
+to one, and a token that lacks a tool's scope does not see that tool:
+
+| To use | The token needs |
+|---|---|
+| `/loomcycle:run`, `fanout`, `cancel`, `compact`, `retune`, `review`, `steer`, `decide` | `runs:create` |
+| `/loomcycle:runs`, and reading a run | `runs:read` |
+| memory, documents, paths, definitions | nothing beyond being a non-isolated token of the tenant |
+| `/loomcycle:operator-token`, `/loomcycle:snapshot` | `substrate:admin` |
+
+So a token for day-to-day use from the IDE is `runs:create,runs:read` at the
+least, or `substrate:tenant` for the whole tenant surface. A token minted with
+`runs:create` alone can start a run and then cannot read it back.
+
+## Static alternative — declared principals
 
 Minting is the **runtime** way to create a per-principal token. For a **stable
-service identity** you don't want to mint and rotate at runtime, loomcycle RFC AO
-lets the operator **declare** one in `loomcycle.yaml` instead:
+service identity** you don't want to mint and rotate at runtime, the operator
+can **declare** one in `loomcycle.yaml` instead:
 
 ```yaml
 principals:

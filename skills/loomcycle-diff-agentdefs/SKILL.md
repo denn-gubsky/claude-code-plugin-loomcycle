@@ -1,6 +1,6 @@
 ---
 name: loomcycle-diff-agentdefs
-description: Diff two loomcycle AgentDef versions by def_id and show what changed in system_prompt, tools, max_tokens, and other fields. Use when the user wants to compare two versions of a self-evolving agent definition.
+description: Diff two loomcycle AgentDef versions by def_id and show what changed in system_prompt, tools, model routing, grants, hooks and other fields. Use when the user wants to compare two versions of an agent definition.
 ---
 
 # Diff two loomcycle AgentDef versions
@@ -14,6 +14,10 @@ Steps:
 1. **Get the two def_ids.** The operator supplies two `def_id`s (often a
    parent and its descendant). If they only have one and want "the previous
    version," fetch the one they have first and read its `parent_def_id`.
+
+   To find ids from a name, `{ "op": "list", "name": "<agent>" }` returns the
+   versions. Note which one is **active**: a version that was created or forked
+   but never promoted is not what runs.
 
 2. **Fetch both** with the `agentdef` tool, `get` op, once per id:
 
@@ -29,6 +33,15 @@ Steps:
      two full prompts side by side unless they're short.
    - `tools` — which tools were added / removed.
    - `max_tokens`, `model`, `provider`, `tier`, `effort` — any scalar changes.
+   - **Grants** — `memory_scopes`, `sql_scopes`, `channels`, `volumes`,
+     `interruption`, and the `*_def_scopes` lists. A widened grant changes what
+     the agent can reach even when the prompt is untouched. The `*_def_scopes`
+     lists are authority rather than content and are left out of
+     `content_sha256`, so compare them explicitly; equal hashes do not prove
+     equal reach.
+   - `hooks` — a gate added or removed changes which calls are checked.
+   - `context`, `compaction`, `sampling`, `tool_choice`, `output_format`,
+     `decision` — how the agent manages history, decodes, and is constrained.
    - Any other changed keys.
 
    **`provider: code-js` (v0.16, RFC J).** If either version sets

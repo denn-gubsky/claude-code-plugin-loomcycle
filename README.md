@@ -5,9 +5,10 @@
 # loomcycle plugin for Claude Code
 
 Drive a [loomcycle](https://github.com/denn-gubsky/loomcycle) agentic runtime
-from inside Claude Code — spawn and cancel runs, list them, snapshot the
-runtime, submit evaluations, inspect agent memory, and import `.claude/` repos
-— all through slash commands and skills, with no JSON pasting.
+from inside Claude Code — spawn, fan out, retune, review and cancel runs, ask a
+decision model, snapshot the runtime, submit evaluations, read and write agent
+memory, and import `.claude/` repos — all through slash commands and skills,
+with no JSON pasting.
 
 This plugin is the **UX layer** over loomcycle's `loomcycle mcp` stdio server.
 loomcycle exposes its primitives as MCP meta-tools (`spawn_run`, `cancel_run`,
@@ -25,7 +26,11 @@ that server and wraps the common workflows in operator-friendly commands.
 - **loomcycle on PATH** (or set `bin_path` at install). The plugin does **not**
   bundle or start the loomcycle binary — install it separately (Homebrew /
   Docker / release binary) and have an instance reachable.
-- **A `loomcycle.yaml`** the `loomcycle mcp` server will load.
+- **A loomcycle runtime already running** at the URL you give as `base_url`.
+  The plugin is a thin client of it and loads no `loomcycle.yaml` of its own.
+- **A bearer token** for that runtime, unless it runs in open mode. What the
+  token may do decides which tools the plugin sees; see
+  [Which token to give the plugin](#which-token-to-give-the-plugin).
 - Claude Code v2.1+ (plugin support).
 
 ## Install
@@ -126,21 +131,36 @@ All commands are namespaced under the plugin name: `/loomcycle:<command>`.
 | Command | Wraps | Purpose |
 |---|---|---|
 | `/loomcycle:connect [--user=<id>] [--bearer=<tok>] [--base-url=<url>] [--persist]` | (session state) | Set the active loomcycle identity reused by later commands. The bearer is the per-run `user_bearer`, not the API token. |
-| `/loomcycle:run <agent> [--user=<id>] [--compact] <prompt…>` | `spawn_run` | Spawn a run; the result (final text + `agent_id` cancel handle + `run_id`) streams back. `--compact` turns on per-run context-compaction (≥ v0.32). |
-| `/loomcycle:fanout <agent> [--count=N] [--user=<id>] <prompt…>` | `spawn_runs` | Fan out up to 32 concurrent runs of one agent in a single call; renders the index-aligned results table (≥ v0.32). |
-| `/loomcycle:compact <agent_id> [--reason=<text>]` | `compact_run` | Summarize a **parked** run's history to free context, then continue (≥ v0.32). |
-| `/loomcycle:runs [--user=<id>] [--status=<s>] [--limit=<n>]` | `list_runs` | List recent runs as a table. `user_id` is required (set it once via connect). |
+| `/loomcycle:run <agent> [--user=<id>] [--compact] [--interactive] [--review] [--max-wall=<sec>] [--key=<k>] <prompt…>` | `spawn_run` (`spawn_runs` detached for `--interactive`) | Spawn a run; the result (final text, `agent_id` cancel handle, `run_id`, `session_id`) comes back. Per-run overrides for model, bounds, sampling, forced tool choice and a structured answer schema. |
+| `/loomcycle:fanout <agent> [--count=N] [--detach] [--user=<id>] <prompt…>` | `spawn_runs` | Fan out up to 32 concurrent runs in one call and render the index-aligned results, or start them detached and get handles back. |
+| `/loomcycle:runs [--user=<id>] [--status=<s>] [--limit=<n>] \| --walk=<run_id>` | `list_runs` | List a user's recent runs, or every run of one team walk. |
 | `/loomcycle:cancel <agent_id> [--reason=<text>]` | `cancel_run` | Cancel a running agent; cascades to sub-agents; idempotent. |
-| `/loomcycle:snapshot <create\|list\|restore\|delete> [id]` | the 4 snapshot tools | Runtime snapshot ops from the IDE. Restore/delete confirm first. **Admin token only** — runtime-global, withheld from a `substrate:tenant` session (RFC AG). |
+| `/loomcycle:retune <agent_id> [--model=…] [--tier=…] [--max-iterations=…] [--interactive] [--review]` | `retune_run` | Change a **running** agent's settings without sending it a message: another model, a higher bound, park it for steering, hold its answer for review. |
+| `/loomcycle:steer <run_id> <text…>` | HTTP `POST /v1/runs/{id}/input` | Send a message to a live interactive run. There is no MCP tool for steering. |
+| `/loomcycle:review <agent_id> <approve\|reject> [feedback…]` | `review_run` | Rule on a run whose answer is held for review: approve, send back with feedback, or reject. |
+| `/loomcycle:compact <agent_id> [--reason=<text>]` | `compact_run` | Summarize a **parked** run's history to free context, then continue. |
+| `/loomcycle:decide [--model=<name>] <what to decide>` | `decision` | Ask a decision model a choice, a yes/no or a score about text you supply. A few tokens instead of a run. |
 | `/loomcycle:eval <run_id> <score> [--rationale=<text>]` | `evaluation` (`op=submit`) | Record an evaluation against a completed run. loomcycle never auto-promotes on score. |
-| `/loomcycle:memory <recall\|search\|add\|get\|set\|list> [--scope=agent\|user] [args…]` | `memory` | Inspect/edit an agent's memory: semantic `recall`/`search`, `add` conversation facts, or plain key/value. `add`/`recall` need a memory-layer backend (v0.16). |
-| `/loomcycle:operator-token <create\|rotate\|retire\|get\|list> [--name=<n>] [--tenant=<id>] [--subject=<s>] [--scopes=a,b]` | `operatortokendef` | Mint/rotate/retire per-principal bearer tokens (RFC L multi-tenant auth, loomcycle ≥ v0.17). Operator-admin only; create/rotate show the plaintext **once**. |
+| `/loomcycle:memory <recall\|search\|add\|get\|set\|list\|sql\|…> [--scope=agent\|user\|tenant\|run] [args…]` | `memory` | Read and write a memory keyspace: semantic recall, key/value, per-scope SQL. |
+| `/loomcycle:erasure <report\|execute> <subject> [--confirm]` | `erasure` | Report what the deployment holds about one subject, or erase it. Dry-run by default. |
+| `/loomcycle:snapshot <create\|list\|restore\|delete> [id]` | the 4 snapshot tools | Runtime snapshot ops from the IDE. Restore/delete confirm first. **Admin token only.** |
+| `/loomcycle:operator-token <create\|rotate\|retire\|get\|list> [--name=<n>] [--tenant=<id>] [--subject=<s>] [--scopes=a,b]` | `operatortokendef` | Mint/rotate/retire per-principal bearer tokens. **Admin token only**; `create` needs `--scopes`; create/rotate show the plaintext **once**. |
 
-**Which MCP tool for what** — the runtime exposes 52 meta-tools and several
-clusters sound alike (`spawn_run` vs `spawn_runs`, `register_agent` vs
-`agentdef`, `subscribe_channel` vs `peek_channel`+`ack_channel`,
-`get_snapshot` vs `export_snapshot`). See **[reference/mcp-tools.md](reference/mcp-tools.md)**
-for the map, the traps, and which tools an admin-only token is needed for.
+**Which MCP tool for what** — the runtime exposes 54 meta-tools and several
+clusters sound alike (`spawn_run` vs `spawn_runs` vs `configured_run`,
+`retune_run` vs `review_run` vs steering, `register_agent` vs `agentdef`,
+`subscribe_channel` vs `peek_channel`+`ack_channel`, `get_snapshot` vs
+`export_snapshot`). The commands above wrap the common ones; the rest — teams
+(`teamdef`), hook definitions (`hookdef`), draft runs (`configured_run`),
+documents, paths, chat history, channels and every definition kind — are called
+directly. See **[reference/mcp-tools.md](reference/mcp-tools.md)** for the map,
+the traps, and which tools each kind of token can reach.
+
+> **Tool names.** With the plugin's own server, Claude Code names the tools
+> `mcp__plugin_loomcycle_loomcycle__<tool>`. A project that registers the server
+> itself under the name `loomcycle` (see *Wiring a project that doesn't use the
+> plugin's server*) gets `mcp__loomcycle__<tool>`. The commands and hooks accept
+> both.
 
 ## Skills
 
@@ -149,10 +169,11 @@ Skills load automatically when their description matches what you're doing:
 | Skill | What it does |
 |---|---|
 | `loomcycle-spawn-evaluator` | Spawn an independent evaluator agent to score the current transcript or a named run, then offer to record the score. |
-| `loomcycle-replay-failed-run` | `get_run` → diagnose the failure → re-spawn with the smallest fix. Stops after a repeat failure and recommends an operator-side config fix. |
-| `loomcycle-diff-agentdefs` | Diff two AgentDef versions by `def_id` (`system_prompt` / `tools` / `max_tokens` / lineage). Descriptive only. |
-| `loomcycle-import-claude-code` | Guided wrapper over `loomcycle import claude-code` (RFC C2): dry-run → review the lossy report → `--write` → `validate`. |
-| `loomcycle-configure` | Author/tune `loomcycle.yaml` + env: providers, model tiers, `user_tiers`, fallbacks, the env-var catalogue, six deployment profiles (brew/in-system · containerized · true sandbox · server · multi-tenant · cloud), and the runtime primitives — filesystem **Volumes** (RFC AH), the **Bashbox** in-process sandbox (RFC AJ), the **Path** VFS (RFC AL), and chunked-graph **Documents** (RFC AK). Never writes the env file — prints the lines. |
+| `loomcycle-replay-failed-run` | `get_run` → diagnose the failure from its status, stop reason and error category → re-spawn with the smallest fix. Stops after a repeat failure and recommends an operator-side config fix. |
+| `loomcycle-diff-agentdefs` | Diff two AgentDef versions by `def_id` (`system_prompt` / `tools` / routing / grants / hooks / lineage). Descriptive only. |
+| `loomcycle-import-claude-code` | Guided wrapper over `loomcycle import claude-code`: report → review what is lossy → `--dry-run` diff → `--write` → `validate`. |
+| `loomcycle-memory` | Operate memory over MCP: the four scopes, recall vs search vs key/value, the asynchronous `add` path, per-scope SQL, the bi-temporal fact graph, Documents and Paths, chat history, provenance and subject erasure. |
+| `loomcycle-configure` | Author/tune `loomcycle.yaml` + env: providers, model tiers and aliases (including decision models and embedders), `user_tiers`, fallbacks, per-agent sampling / context / compaction, the env-var catalogue, six deployment profiles (brew/in-system · containerized · true sandbox · server · multi-tenant · cloud), and the runtime primitives — **Volumes**, the **Bashbox** sandbox, the **Path** VFS, chunked-graph **Documents**, encrypted **credentials**, token budgets, interactive runs and review holds, inbound webhooks and external MCP servers. Never writes the env file — prints the lines. |
 
 ## Optional hooks
 
@@ -161,16 +182,17 @@ Both hooks ship **disabled** — they no-op unless you opt in with an env var.
 | Hook | Enable with | Action |
 |---|---|---|
 | capture-run-telemetry | `LOOMCYCLE_PLUGIN_TELEMETRY=1` | Append `{ts, run_id, agent_id}` to `${CLAUDE_PLUGIN_DATA}/run-telemetry.jsonl` after each `spawn_run`. |
-| auto-snapshot-on-error | `LOOMCYCLE_PLUGIN_AUTO_SNAPSHOT=1` | On a state-mutating tool error, run `loomcycle snapshot --description pre-error-<ts>`. Needs `LOOMCYCLE_AUTH_TOKEN` (and optionally `LOOMCYCLE_BASE_URL`) exported in the shell that launches Claude Code — the hook reads the bearer from the environment, never from a substituted command string. |
+| auto-snapshot-on-error | `LOOMCYCLE_PLUGIN_AUTO_SNAPSHOT=1` | On a state-mutating tool error, run `loomcycle snapshot --description pre-error-<ts>`. Needs `LOOMCYCLE_AUTH_TOKEN` (and optionally `LOOMCYCLE_BASE_URL`) exported in the shell that launches Claude Code — the hook reads the bearer from the environment, never from a substituted command string. Snapshots are admin-only, so that token must be an admin one. |
+
+These are **Claude Code** hooks: they watch this IDE's tool calls. They are
+unrelated to loomcycle's own agent hooks (`hookdef`), which gate what a
+loomcycle agent does.
 
 ## Multi-tenant authorization, isolation & token rotation
 
-loomcycle v0.17.0 (RFC L) adds per-principal bearer tokens (`OperatorTokenDef`,
-`lct_…`), each bound to an authoritative `{tenant_id, subject, scopes}` resolved
-**from the token**. How much of that the plugin enforces depends entirely on
-**which transport** the bundled MCP server uses:
-
-Since 0.21.0 the default stdio transport is a **thin client** that proxies to the
+loomcycle has per-principal bearer tokens (`OperatorTokenDef`, `lct_…`), each
+bound to an authoritative `{tenant_id, subject, scopes}` resolved **from the
+token**. The plugin's stdio transport is a **thin client** that proxies to the
 runtime's `POST /v1/_mcp` — the **same principal-enforced path** as the direct
 HTTP transport. So the plugin's authority is governed by the **token's principal
 on the upstream**, regardless of transport:
@@ -186,28 +208,48 @@ the default already routes through the principal-enforced `/v1/_mcp`. (The
 [HTTP example](examples/mcp-http-tenant.json) remains a valid alternative
 transport if you'd rather not run the stdio proxy process.)
 
-### Tenant & declared-principal tokens (loomcycle RFC AG + AO)
+### Which token to give the plugin
 
-A recent loomcycle line (RFC AG + AO, post-v1.4.0) makes the `auth_token` you
-hand the plugin a **first-class tenant identity**, not just an admin key:
+What the token holds decides which tools the session **sees**. A tool the token
+may not call is absent from the tool list, not merely refused, so a "missing"
+tool is usually a scope, not a broken runtime.
 
-- **`/v1/_mcp` is now a `substrate:tenant` route (RFC AG).** Earlier the
-  loomcycle MCP transport ran as a *global operator* and the route required
-  `substrate:admin`, so a tenant `lct_…` bearer was refused at the door — the
-  plugin effectively needed an admin token. Now a `substrate:tenant` token
-  **opens the session** and everything inside is confined to its tenant. (On an
-  older loomcycle build without the flip, a tenant token still 403s at the
-  route — see the Compatibility note.)
+| Token | The plugin can |
+|---|---|
+| Admin (`substrate:admin`, the legacy `LOOMCYCLE_AUTH_TOKEN`, or an open-mode runtime) | Everything, across tenants. |
+| `substrate:tenant` | Everything inside one tenant. No token minting, snapshots or runtime pause. |
+| A member token with `runs:create` + `runs:read` | Start, steer, retune, review, cancel and read runs; ask a decision model; author definitions and use memory, documents and paths in its tenant. |
+| A member token with `runs:read` only | Read and list runs, plus definitions and data. It cannot start, cancel or retune anything. |
+| An isolated `substrate:user` token | One tool: `credentialdef`, for its own user-scope credentials. |
+
+Since loomcycle v1.107.0 an MCP session is held to its token's scopes the same
+way the HTTP API is: the run tools need `runs:create`, the run-reading tools
+`runs:read`, and the single-purpose channel tools `channel:publish` /
+`channel:read`. **A token minted with `runs:create` alone can start a run and
+cannot read it back** — mint `runs:create,runs:read` for day-to-day use. The
+full table is in [reference/mcp-tools.md](reference/mcp-tools.md).
+
+### Tenant & declared-principal tokens
+
+The `auth_token` you hand the plugin is a **first-class tenant identity**, not
+just an admin key (loomcycle ≥ v1.5.0):
+
+- **`/v1/_mcp` admits a tenant token.** A `substrate:tenant` token **opens the
+  session** and everything inside is confined to its tenant. (On a loomcycle
+  build older than v1.5.0 the route still needs `substrate:admin` and a tenant
+  token 403s — see the Compatibility note.)
 - **A per-tool gate withholds the admin-only meta-tools.** Inside a
   `substrate:tenant` session, the runtime-global / minting tools are hidden from
   `tools/list` and refused on `tools/call`. Concretely, with a tenant token:
   - ✅ **work, tenant-confined:** `/loomcycle:run`, `/loomcycle:fanout`,
     `/loomcycle:runs`, `/loomcycle:cancel`, `/loomcycle:compact`,
-    `/loomcycle:memory`, `/loomcycle:eval`, `/loomcycle:steer`.
+    `/loomcycle:retune`, `/loomcycle:review`, `/loomcycle:steer`,
+    `/loomcycle:decide`, `/loomcycle:memory`, `/loomcycle:erasure`,
+    `/loomcycle:eval`.
   - 🔒 **need an admin token:** `/loomcycle:operator-token` (token minting) and
     `/loomcycle:snapshot` (runtime-global). A refusal here is *expected*, not a
     plugin bug — a confined tenant key is meant to be unable to mint or snapshot.
-- **Declared principals (RFC AO) — one token for the UI *and* the plugin.**
+- **Declared principals — one token for the UI *and* the plugin.**
   Instead of minting an `OperatorTokenDef`, the operator can **declare** a stable
   login in `loomcycle.yaml` and bind it to a secret in `.env.local`:
   ```yaml
@@ -228,16 +270,18 @@ one for the grace window. Two sharp edges to know:
 
 1. **Creating the first admin `OperatorTokenDef` disables the legacy
    `LOOMCYCLE_AUTH_TOKEN`** for inbound HTTP (loomcycle fails closed onto the
-   substrate). If `auth_token` is still that legacy value, the HTTP-using
-   **auto-snapshot hook** (and the HTTP transport above) will start returning
-   401 — update `auth_token` to a valid `lct_…` admin bearer.
+   substrate). If `auth_token` is still that legacy value, every plugin call,
+   the **auto-snapshot hook** and `/loomcycle:steer` start returning 401 —
+   update `auth_token` to a valid `lct_…` bearer.
 2. **A running `loomcycle mcp` captured its token at launch.** After updating
    the `auth_token` userConfig, **restart Claude Code** so the MCP server picks
    up the new bearer. Rotate within the grace window to avoid a gap.
 
-The stdio command surface keeps working across a rotation regardless (stdio is
-operator-trust) — only the HTTP-authed paths (the snapshot hook, or the HTTP
-transport) depend on a currently-valid bearer.
+The thin client forwards its bearer on every request, so nothing in the plugin
+keeps working on a retired token once the grace window closes.
+
+`create` needs an explicit `--scopes` list (loomcycle ≥ v1.87.0). It used to
+default to `substrate:admin`; an omitted list is now refused.
 
 ## Local development
 
@@ -252,6 +296,7 @@ claude plugin validate ./claude-code-plugin-loomcycle   # validate before publis
 
 | This plugin | loomcycle | Claude Code |
 |---|---|---|
+| 1.10.0 | Same runtime requirement as 0.21.0 (`loomcycle mcp --upstream` thin client; an instance running at `base_url`). Grounded against loomcycle source at the **v1.107.0 tag** (54 MCP tools). The commands work against an older runtime where the tool they wrap exists: `/loomcycle:decide` needs **≥ v1.107.0**, `fanout --detach` and `run --interactive` **≥ v1.105.0**, `run --max-wall` / `--key` **≥ v1.106.0**, `/loomcycle:review` **≥ v1.93.0**, `/loomcycle:retune` **≥ v1.83.0**. ⚠️ Three runtime changes an upgrader meets through the plugin: an MCP session is held to its token's scopes (**v1.107.0** — a `runs:create`-only token no longer reads runs); `operatortokendef create` refuses an omitted scope list (**v1.87.0**); the `register_hook` / `list_hooks` / `delete_hook` tools are gone, replaced by hooks on the agent definition and `hookdef` (**v1.97.0**). | ≥ 2.1 |
 | 1.5.0 | Same runtime requirement as 0.21.0 (`loomcycle mcp --upstream` thin client; an instance running at `base_url`). Tracks loomcycle **v1.5.0** — the **RFC AG** per-principal `/v1/_mcp` transport (PRs #549–#553) + **RFC AO** config-declared principals (#554–#555). **The MCP tool contract is UNCHANGED** — this is an auth/route change, not new meta-tools: `/v1/_mcp` moves `substrate:admin → substrate:tenant` (a tenant or config-declared-principal `auth_token` can now drive the plugin, confined to its tenant), and a per-tool gate withholds the admin-only meta-tools (`/loomcycle:operator-token` + `/loomcycle:snapshot` need an admin token). RFC AO lets the operator declare a `(tenant, subject)` login in `loomcycle.yaml` and use one token for both the Web UI and the plugin. ⚠️ **Requires loomcycle ≥ v1.5.0** for a tenant / config-declared-principal token to open `/v1/_mcp`; on an older build the route is still `substrate:admin` and a tenant token 403s (use an admin token, or upgrade loomcycle). | ≥ 2.1 |
 | 1.4.0 | Same runtime requirement as 0.21.0 (`loomcycle mcp --upstream` thin client; an instance running at `base_url`). Version-vector track through loomcycle's **v1.2.0 → v1.4.0** line, grounded against source at the **v1.4.0 tag**. **MCP contract is additive — adds the `path` (RFC AL) + `document` (RFC AK) meta-tools** (the thin client auto-advertises them, so `.mcp.json` needs no edit). Skill grounding adds the three new primitives an operator configures: **Bashbox** (RFC AJ, v1.3.0 — `LOOMCYCLE_BASHBOX_ENABLED` + the host-command fallback), **Path** (RFC AL — `tools:[Path]`), and **Documents** (RFC AK — `tools:[Document]` + `LOOMCYCLE_SQLMEM_ENABLED`, the SQL Memory prerequisite, RFC AA v1.2.0). Thin-client `--upstream` wiring unchanged. | ≥ 2.1 |
 | 1.1.1 | Same runtime requirement as 0.21.0 (`loomcycle mcp --upstream` thin client; an instance running at `base_url`). Tracks loomcycle **v1.1.1** — **RFC AI interactive agentic sessions**: a run with `interactive: true` parks at `end_turn` for operator steering (`POST /v1/runs/{id}/input`) and is re-attachable (`GET /v1/runs/{id}/stream`). Adds `/loomcycle:steer` (HTTP — there is **no MCP steering tool**) + `reference/interactive.md`; `/loomcycle:run` documents the `interactive` flag. MCP tool contract unchanged. *(Documented retroactively in the 1.4.0 changelog backfill.)* | ≥ 2.1 |
@@ -264,10 +309,10 @@ claude plugin validate ./claude-code-plugin-loomcycle   # validate before publis
 | 0.20.2 | as 0.20.1, **plus** the `loomcycle mcp --no-http` flag (verified on v0.22.0). On an older build that doesn't recognise `--no-http`, the server errors at launch — pin 0.20.1 or upgrade loomcycle. | ≥ 2.1 |
 | 0.20.1 | ≥ v0.12.x (`loomcycle mcp` + meta-tools); memory `add`/`recall` need ≥ v0.16; `operator-token` needs ≥ v0.17 | ≥ 2.1 |
 
-The plugin's version tracks loomcycle's version vector through the v1.x batch.
-All tool contracts are re-verified against loomcycle's `internal/api/mcp/tools.go`
-each release — the v0.12.x → v0.16.x meta-tool additions are back-compatible,
-so the existing commands work unchanged against any loomcycle ≥ v0.12.x.
+The plugin is versioned on its own; each release names the loomcycle tag it was
+checked against. Tool contracts are re-verified against loomcycle's
+`internal/api/mcp/tools.go` each release. Most additions to the tool surface are
+back-compatible; the exceptions are called out in the table above.
 
 The plugin consumes loomcycle's MCP tools verbatim. If a capability is missing,
 it's a feature request on the loomcycle repo — the plugin ships no workarounds.
@@ -300,8 +345,24 @@ it's a feature request on the loomcycle repo — the plugin ships no workarounds
   `LOOMCYCLE_MCP_ALLOW_PRIVILEGED_TOOLS`). Only a **full Claude Code restart**
   picks up a changed `settings` `env`. (Exporting the var in the shell that
   launches Claude Code, then restarting, is the reliable path.)
-- **`list_runs` errors** — it requires `user_id`. Set one via
-  `/loomcycle:connect --user=<id>` or pass `--user=` on the command.
+- **A tool is missing from the session** — the token may not call it, so the
+  runtime does not list it. `spawn_run` and the other run-writing tools need
+  `runs:create`, `get_run` / `list_runs` need `runs:read`, and snapshots, token
+  minting and runtime pause need `substrate:admin`. See
+  [Which token to give the plugin](#which-token-to-give-the-plugin).
+- **A tool call fails with `cannot unmarshal string into Go struct field …`**
+  — the session is holding tool schemas from before a runtime upgrade. Claude
+  Code reads the tool list once, at connection. Reload the plugin.
+- **`register_hook` / `list_hooks` / `delete_hook` no longer exist** — removed
+  in loomcycle v1.97.0. Hooks now live on the agent definition; author reusable
+  ones with `hookdef`.
+- **`list_runs` errors** — it requires exactly one of `user_id` or `walk_id`.
+  Set a user via `/loomcycle:connect --user=<id>` or pass `--user=` on the
+  command.
+- **`/loomcycle:run` never returns** — `spawn_run` blocks for the whole run. A
+  run that waits for a person (interactive, or held for review) is started
+  detached; the command does that for `--interactive`. Bound a blocking call
+  with `timeout_ms`, or the run with `--max-wall`.
 - **Bearer / auth** — the API bearer lives in your OS keychain via the
   `auth_token` userConfig, never in the repo. The per-run bearer set by
   `/loomcycle:connect` is a separate, session-scoped value.
@@ -312,8 +373,9 @@ it's a feature request on the loomcycle repo — the plugin ships no workarounds
 
 - Start, stop, or health-check loomcycle (lifecycle is the operator's job).
 - Bundle the loomcycle binary.
-- Push agent definitions *into* loomcycle (that's `loomcycle import claude-code`
-  — RFC C2 — the data-movement direction; this plugin moves runtime control).
+- Push a `.claude/` directory *into* loomcycle by itself (that's the
+  `loomcycle import claude-code` CLI, which the `loomcycle-import-claude-code`
+  skill walks you through).
 
 ## License
 

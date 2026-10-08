@@ -1,4 +1,4 @@
-# Document primitive reference (v1.4.0+), entity tier (v1.42.0), ontology hierarchy (v1.52.0)
+# Document primitive reference (v1.4.0+), entity tier (v1.42.0), ontology hierarchy (v1.52.0), 47 ops as of v1.107.0
 
 A `Document` is a **chunked-graph document**: instead of one opaque blob, it's a
 tree of **chunks** — each a first-class unit with a UUID, a hierarchy position,
@@ -22,7 +22,9 @@ Two requirements:
 1. **`tools: [Document]`** — the per-agent gate (Document is always registered).
 2. **SQL Memory enabled** — the chunk-structure tables live there, so the
    deployment needs **`LOOMCYCLE_SQLMEM_ENABLED=1`**. Without it every
-   `Document` call is refused with "requires SQL Memory."
+   `Document` call is refused with "not configured — requires the Store backend
+   and SQL Memory". `search`, `related` and `verbatim_answer` also need an
+   embedder.
 
 ```yaml
 agents:
@@ -51,23 +53,61 @@ LOOMCYCLE_SQLMEM_ENABLED=1
 
 ## Operations
 
+The tool has **47 ops**. The `op` enum in the tool's input schema is the
+authority; this table groups it the way the tool's own description does.
+
 | group | ops |
 |---|---|
-| Document lifecycle | `create_document`, `get_document` (by `id` or `path`), `documents_summary`, `delete_document`, `set_path` |
-| Chunk lifecycle | `create_chunk` (`parent_id`/`position`/`after_id`), `get_chunk`, `update_chunk`, `delete_chunk`, `move_chunk`, `reorder_chunk` |
-| Entity tier (v1.42.0) | `upsert_chunk`, `supersede_chunk`, `graph_recall`, `list_facts` |
-| Verified writes (v1.54.0) | `judge_fact`, `verbatim_answer`, `verification_stats` — see the section below |
-| Ontology (v1.53.0) | `propose_entity` — SUGGEST a type; see the ontology section |
-| Edges | `link_chunks`, `unlink_chunks`, `get_edges`, `backlinks`, `related`, `unlinked_mentions` |
-| Query | `query_chunks`, `query_documents`, `search` (semantic, over chunk bodies) |
-| Tags | `add_tags`, `remove_tags`, `list_tags` |
-| History | `history`, `get_version`, `diff` |
-| Types | `define_type`, `list_types` |
-| Images (v1.30.0) | `set_asset`, `get_asset` |
-| Markdown / canvas | `export_md`, `import_md`, `export_canvas`, `import_canvas` |
+| Documents (6) | `create_document`, `get_document`, `query_documents`, `documents_summary`, `delete_document`, `set_path` |
+| Chunks (6) | `create_chunk` (`parent_id`/`position`/`after_id`), `get_chunk`, `update_chunk`, `delete_chunk`, `move_chunk`, `reorder_chunk` |
+| Facts (8) | `upsert_chunk`, `supersede_chunk`, `graph_recall`, `list_facts`, `judge_fact`, `verbatim_answer`, `verification_stats`, `remember` |
+| Ontology (2) | `propose_entity`, `propose_subject` — SUGGEST only; see the ontology section |
+| Links (6) | `link_chunks`, `unlink_chunks`, `get_edges`, `backlinks`, `related`, `unlinked_mentions` |
+| Tags (3) | `add_tags`, `remove_tags`, `list_tags` |
+| History (3) | `history`, `get_version`, `diff` |
+| Types (2) | `define_type`, `list_types` |
+| Assets (2) | `set_asset`, `get_asset` (images) |
+| Search (2) | `query_chunks` (by structure), `search` (by what bodies say) |
+| Import / export (4) | `export_md`, `import_md`, `export_canvas`, `import_canvas` |
+| Federation (3) | `set_remote`, `sync`, `diff_remote` |
 
-`scope` is `agent` (default), `user` (needs a `user_id` on the run), or **`tenant`**
-(shared by every user and agent in the tenant — since v1.41.0).
+`scope` is `user` (**the default** — needs a `user_id` on the run), `agent`, or
+**`tenant`** (shared by every user and agent in the tenant — since v1.41.0).
+**One scope per call**: a chunk id from one scope is "no such chunk" in another,
+so pass the same `scope` on every call about the same document. Path defaults to
+`agent`, so pass `scope` there too when you look a document up by name.
+
+### Three ids, and which field takes which
+
+`create_document` returns `{document_id, root_chunk_id, title, path}`.
+
+- `document_id` names the whole document. Chunk ops and `export_md` take it as
+  `document_id`. The whole-document ops (`get_document`, `delete_document`,
+  `set_path`, `set_remote`, `sync`, `diff_remote`) take it as `id` **or**
+  `document_id`, or a `path`; passing `id` and `document_id` with different
+  values is refused.
+- `root_chunk_id` is the chunk holding the title. `list_facts` `about` wants
+  this, not the `document_id`.
+- A chunk `id` goes in `id`, `parent_id`, `after_id`, `from_id`, `to_id`,
+  `seed_ids`.
+
+Ids are 32 hex characters. A shortened one (`b4407b52…`, or a bare hex prefix)
+is refused with "is cut short … Nothing was done" — copy the whole id.
+
+### `create_document` validates the path first
+
+Omit `path` and the document lands at `/documents/<title-slug>`. A malformed
+`path` (a space, or any character outside letters, digits, `.`, `_`, `-`) now
+**fails the call and creates nothing** — it used to succeed with a
+`path_warning` and leave a document outside the tree. `import_md` and
+`import_canvas` likewise write nothing on a bad path. A path already in use is
+taken over: the old resource keeps existing but loses that name, so two
+documents with the same title fight over one default path.
+
+`documents_summary` needs `document_ids` and/or `under_path` (with neither it is
+refused); it returns title, root type/status and colour settings for many
+documents in one call, bounded at 500 by default with `truncated: true` when it
+clips. Use `query_documents` to *list* a scope's documents.
 
 ### Tenant scope needs TWO grants
 
@@ -95,11 +135,16 @@ predates the tenant work.)
 - **`upsert_chunk` deliberately takes no `revision`** — see the entity tier below.
 - **`move_chunk`** re-parents with a cycle guard (a chunk can't become its own
   ancestor); **`reorder_chunk`** shifts one chunk up/down among its siblings.
+- **A chunk with no parent goes under the root.** `create_chunk` without
+  `parent_id`, and `move_chunk` with an empty `new_parent_id`, place the chunk
+  directly under the document's title. A mistyped `document_id` is refused
+  rather than creating an orphan.
 - **`query_chunks`** takes structured filters (`document_id`/`type`/`status`/
-  `parent_id`, plus `under_path:` joining the Path tree) **or** a `sql:` escape
-  hatch — a raw read-only `SELECT`, validator-gated (no `ATTACH`/`PRAGMA`/writes).
-  The chunk table is named **`chunks`**, and the entity sidecar
-  **`chunk_memory_meta`**.
+  `parent_id`/`tag`/`tag_prefix`, plus `under_path:` joining the Path tree)
+  **or** a `sql:` escape hatch — a raw read-only `SELECT`, validator-gated (no
+  `ATTACH`/`PRAGMA`/writes), which ignores the filters. Tables: **`documents`**,
+  **`chunks`**, **`chunk_edges`**, **`chunk_tags`**, **`document_tags`**, and the
+  entity sidecar **`chunk_memory_meta`**. Chunk bodies are not in any of them.
 - **Change events.** `update_chunk`/`move_chunk`/`link_chunks`/`delete_chunk`
   publish `{op, chunk_id, timestamp, actor}` to `documents/<id>/chunks`, so a
   co-authoring UI sees edits live.
@@ -126,7 +171,7 @@ sets `expired_at`.
 ### `upsert_chunk` — write by natural key, not by id
 
 ```
-mcp__loomcycle__document {
+document {
   "op": "upsert_chunk", "scope": "user", "document_id": "<id>",
   "natural_key": "person:alice:role", "title": "Alice's role",
   "body": "Alice leads the platform team.",
@@ -157,11 +202,18 @@ treat it as a claim an agent makes rather than something the runtime verified.
 ### `supersede_chunk` — correct without deleting
 
 ```
-mcp__loomcycle__document {
+document {
   "op": "supersede_chunk", "scope": "user",
   "id": "<the new fact>", "supersedes_id": "<the fact it replaces>"
 }
+→ { "id": "…", "supersedes": "…", "retired_at": 1785424758000000000 }
 ```
+
+Write the replacement first — `upsert_chunk` under a **new** `natural_key`;
+reusing the old key overwrites the fact in place instead of correcting it.
+A chunk can be retired only once: a second, different replacement is refused and
+the refusal names the newer fact to supersede instead. Repeating the same call
+returns `already: true`.
 
 Stamps both end-timestamps on the retired chunk and links the replacement to it
 with a `supersedes` edge. **The retired chunk stays readable** — that is the whole
@@ -184,24 +236,62 @@ chain and its timestamps intact.
 ### `graph_recall` — walk the relations, time-aware
 
 ```
-mcp__loomcycle__document {
+document {
   "op": "graph_recall", "scope": "user",
   "query": "on-call rotation",          // or "seed_ids": ["<chunk>", …]
   "hops": 2, "as_of": 1785424758000000000, "include_retired": false
 }
-→ { "chunks": [{ "id", "title", "type", "hop", "valid_at", "retired" }, …],
-    "hops": 1, "seeds": 1, "truncated": false }
+→ { "chunks": [{ "id", "title", "type", "hop", "via_kind", "via_id", "valid_at", "retired" }, …],
+    "seeds": 5, "hops": 2, "truncated": false, "seeded_by": "semantic" }
 ```
 
 Expands bidirectionally from seeds (found by `query`, or named outright via
-`seed_ids`) up to `hops` (max 2, frontier capped at 500). `as_of` drops facts the
-store did not believe at that instant — applied to **discovery only**, never to
-seeds you named explicitly, so asking about a fact you already hold still works.
-Retired chunks are excluded unless `include_retired: true`.
+`seed_ids`, at most 500) up to `hops` — 0 to 6, default 1, each hop's frontier
+capped at 500. **A hop is one edge**, so fact → subject → fact costs two: a
+two-step question needs `hops: 2`, a three-step one `hops: 4`. With an embedder
+the `query` seeds by meaning (`seeds`, default 5, picks how many); without one it
+matches fact titles. `limit` is 50 by default, 200 at most. `budget_chars` caps
+the answer on content instead of rows and backfills what the walk did not reach
+(those rows carry `hop: -1`); bound a long walk with it rather than with fewer
+hops. It returns titles, not bodies — `get_chunk` for those.
+
+`as_of` (unix nanos) answers what was true at that instant, so a fact corrected
+since still comes back. Retired chunks are excluded unless `include_retired:
+true`, and facts a judge refused unless `include_refuted: true`.
 
 > `seed_ids` is an array, `hops`/`as_of` integers, `include_retired` a boolean.
 > If your MCP client sends them as strings you will get
 > `cannot unmarshal string into Go struct field` — see the upgrade note below.
+
+### `list_facts` — browse what is known about a subject
+
+```
+document { "op": "list_facts", "scope": "user", "about": "<the subject's root_chunk_id>", "claims_only": true }
+→ { "facts": [{ "id", "document_id", "title", "type", "revision", "entity": { … } }], "count": 1, "truncated": false }
+```
+
+Newest first, metadata only. Since v1.77.0 a subject is its own document under
+`/facts/<subject>` and its facts are that document's children; `about` returns
+the facts filed under it **and** the facts elsewhere that point at it.
+`claims_only: true` drops the subject name nodes and keeps only the claims —
+turn it on for anything a person will read. `across_scopes: true` (with `about`)
+also finds the same subject in your other readable scopes. Filters: `type`
+(includes subtypes), `class`, `document_id`, `source_run_id`, `as_of`,
+`include_retired`, `include_refuted`; `limit` 50 by default, 200 at most.
+
+### `remember` — a statement a person asked you to keep
+
+```
+document { "op": "remember", "scope": "user", "text": "Ada takes her coffee black, no sugar." }
+→ { "id": "<chunk>", "natural_key": "memory/operator/ada-takes-her-coffee-black-no-sugar", "created": true }
+```
+
+Stores one self-contained sentence (at most 1000 characters) as a fact that
+cites itself: the text is both the claim and its source span, filed
+`evidential`. Optional `type` + `subject` (both or neither). The key is derived
+from the start of the text, so the same sentence twice updates one fact — and
+two sentences sharing their first 60 or so characters overwrite each other.
+**Additive only; there is no "forget".**
 
 ---
 
@@ -280,6 +370,25 @@ shared store to offer one.
 The bundled **`memory/ontologist`** agent (in the `memory` bundle) does this as a
 pass over one user's stored facts, on demand from the Settings panel.
 
+### …and may SUGGEST a subject the tenant does not know yet (v1.79.0)
+
+`propose_entity` suggests a *type*; `propose_subject` suggests a *subject* — a
+person, place or thing learned in one scope that should become a shared subject
+of the whole tenant. An unknown subject is never minted from a transcript; it is
+proposed, and an operator adopts it.
+
+```json
+{"op":"propose_subject","subject":"Dave Kim","natural_key":"person:dave-kim",
+ "body":"Named in 6 conversations as the shop's floor manager."}
+```
+
+→ `{proposed, chunk_id, natural_key, note}`, or `{proposed, already: "<status>",
+note}` when it was filed before (not an error). `natural_key` is `<type>:<slug>`
+and is used **verbatim** on adoption, so pass the key your facts already point
+at. Optional `path` is a single segment, the name the subject gets under
+`/facts/`. Like `propose_entity` it needs no tenant grant and changes nothing
+until adopted — facts about the subject stay in the scope that learned them.
+
 ---
 
 ## Verified writes — quote a fact instead of generating one (v1.54.0)
@@ -306,7 +415,10 @@ not coming back, pass `include_refuted: true` — each refused fact comes back w
 judge's stated reason. A fact with **no** verdict is not hidden; unjudged and refuted
 are different states, and only the second is withheld.
 
-**Do not judge your own facts.** `judge_fact` exists for the verification pass, which
+**Do not judge your own facts.** `judge_fact` (`id` or `natural_key`, `verdict`,
+`reason` — all required) records `supported`, `unclear`, `mistyped` or
+`unsupported`; only `unsupported` withholds the fact, and the server owns the
+confidence each maps to. It exists for the verification pass, which
 runs a separate agent that never wrote the claim it is checking. An agent marking its
 own writes `supported` is self-certification and defeats the entire mechanism. If you
 have written something you believe is well-evidenced, leave it unjudged — that reads
@@ -324,17 +436,142 @@ your answer carries a citation and no invented wording:
 
 ```json
 {"answered":true,"answer":"The user's github username is denn.",
- "source":"my github username is denn","confidence":0.9,"score":0.94}
+ "source":"my github username is denn","chunk_id":"…","confidence":0.9,"score":0.94,
+ "judged_at":1785424758000000000}
 ```
 
 It refuses far more often than it answers, and that is the design. `answered:false`
-comes with a `reason` — the closest fact is unverified, or below the similarity floor,
-or two facts match about equally well. **Treat a refusal as "answer normally", never as
+comes with a `reason` — the closest fact is unverified, or below the similarity floor
+(`min_score`, default 0.6), or two facts match about equally well. **Treat a refusal as "answer normally", never as
 "there is nothing".** It only works for lookup: "what is my github username" has a
 verbatim answer, "how should I structure this migration" does not.
 
 `verification_stats` reports how much of a scope is verified — mostly an operator's
-number, useful to you if you are deciding how much to trust the store.
+number, useful to you if you are deciding how much to trust the store. It counts
+claims only, never subject name nodes.
+
+---
+
+## Finding things — search, links, tags
+
+**`search`** is the way in when you do not know which document holds the answer.
+It matches free text against chunk **bodies** across every document in the scope
+— by meaning, and by the words themselves where the server has a word index
+(Postgres with pgvector).
+
+```json
+{"op":"search","scope":"user","query":"how do we roll back a failed database migration","limit":5}
+```
+
+```json
+{"chunks":[{"chunk_id":"…","score":0.82,"rank_score":0.032,"title":"Rollback plan","document_id":"…"}]}
+```
+
+`rank_score` is what ordered the result (meaning and word matches combined);
+`score` is the raw strength of whichever match found the chunk, so a chunk found
+by its words can have a low `score` and still rank first. Compare within one
+result, not against a fixed number. If every `rank_score` equals its `score`
+there is no word index, and an exact string that was not found may still be
+there — look with `query_chunks` and `sql`. No bodies are returned; `get_chunk`
+a hit. `limit` is 10 by default, 50 at most. An agent whose operator switched on
+reranking also sees `reranked` (and `rerank_reason` when false); a hit may carry
+`matched_unit: {kind, text}` when it was found through a generated description
+of its document rather than its own words.
+
+Once you hold a chunk, three ops find its neighbours (all take the chunk `id`):
+
+| op | finds | reply |
+|---|---|---|
+| `backlinks` | chunks that already link **to** it — `link_chunks` edges and `[[name]]` links in bodies | `{backlinks: [{from_id, kind, auto, from_title, from_document_id, …}]}` |
+| `related` | chunks whose bodies say similar things, linked or not (needs an embedder) | `{related: [{chunk_id, score, title, document_id}]}` |
+| `unlinked_mentions` | chunks whose body contains its **title** but do not link to it | `{unlinked_mentions: [{chunk_id, title, document_id}], truncated}` |
+
+`unlinked_mentions` matches the title literally, so it is only useful for a
+distinctive one. `get_edges` (`document_id`) returns every edge in and out of a
+whole document.
+
+**Tags.** `add_tags` / `remove_tags` change tags incrementally and reply with the
+full set afterwards; passing `tags` to `create_chunk` / `update_chunk` /
+`upsert_chunk` / `create_document` **replaces** the whole set. They target a
+chunk (`id`) or a document (`document_id`), and **a document's tags are separate
+from its root chunk's**: `query_chunks` filters chunk tags (`tag`, `tag_prefix`),
+`query_documents` filters document tags. Nest with a slash (`area/billing`).
+`list_tags` with neither id returns every tag in the scope with counts — read it
+before inventing a near-duplicate spelling.
+
+```json
+{"op":"add_tags","scope":"user","id":"<chunk>","tags":["billing/invoices","q3"]}
+```
+
+---
+
+## Body history — `history`, `get_version`, `diff`
+
+Every write of a chunk's **body** is kept. `history` (`id`) lists the revisions
+at which the body changed; `get_version` (`id`, `revision`) returns one exact
+past body; `diff` (`id`, `from_revision`, `to_revision`) returns a unified diff.
+
+```json
+{"op":"diff","scope":"user","id":"<chunk>","from_revision":1,"to_revision":4}
+```
+
+A title-, status- or tag-only edit raises the chunk's `revision` without adding
+a history entry, so **the `revision` from `get_chunk` may not be in the list** —
+use the numbers `history` returns. This is the *chunk's* history; the `history`
+*tool* is something else (past chats).
+
+---
+
+## Canvas — `export_canvas`, `import_canvas`
+
+`export_canvas` (`document_id`, `id` or `path`) renders a document as a JSON
+Canvas v1.0 object — one text node per chunk, one edge per link — for a spatial,
+board-style view or a tool that reads `.canvas` files. The root chunk and the
+hierarchy are not drawn. `import_canvas` (`canvas` as a JSON object, not a
+string; optional `title`, `path`) always builds a **new** document, every node a
+chunk directly under the root.
+
+```json
+{"op":"export_canvas","scope":"user","path":"/docs/launch"}
+```
+
+→ `{canvas: {nodes: [...], edges: [...]}, document_id}`. For readable text use
+`export_md`; `export_md` → `import_md` is the round trip that keeps hierarchy.
+
+---
+
+## Federation — `set_remote`, `sync`, `diff_remote`
+
+A document can be bound to a document on a **peer loomcycle** and reconciled
+with it. The peer must be a *document source* the operator declared (or one
+authored with the `documentsourcedef` tool) — you name the source; you cannot
+point at a URL.
+
+```json
+{"op":"set_remote","scope":"user","path":"/docs/runbook","source":"hq-docs","remote_ref":"/docs/runbook"}
+{"op":"diff_remote","scope":"user","path":"/docs/runbook"}
+{"op":"sync","scope":"user","path":"/docs/runbook","direction":"pull"}
+```
+
+- **`set_remote`** only records the binding (`{document_id, source, remote_ref,
+  bound: true}`); it contacts nobody. `remote_ref` is the document's **path on
+  the peer**, not an id.
+- **`diff_remote`** is the read-only dry run: `only_local`, `only_remote`,
+  `diverged`, `retagged`, `reparented` (lists of `{natural_key, title}`) plus
+  counts. Run it before `sync` to choose a direction.
+- **`sync`** copies one way: `pull` (default) writes the peer's chunks into your
+  document, `push` writes yours up to the peer. It replies with counts
+  (`created`, `updated`, `unchanged`, `reparented`, `edges_added`,
+  `excluded_unkeyed`, `excluded_withheld`).
+
+**Only keyed chunks travel** — chunks carrying a `natural_key` (written with
+`upsert_chunk`), matched across the two servers by that key. Chunks made with
+`create_chunk` or `import_md` are skipped and counted in `excluded_unkeyed`.
+Nothing is deleted on either side, an overwritten body stays in that chunk's
+`history`, and facts a judge refused are not copied. A sync is not
+all-or-nothing; running it again continues. A source authored at runtime reaches
+only a host the operator allow-listed — the refusal names the env var, and
+retrying does not help.
 
 ---
 
@@ -344,10 +581,16 @@ Document is a first-class MCP meta-tool — call it through the thin client to
 co-author the same documents agents build, without spawning a run:
 
 ```
-mcp__loomcycle__document  { "op": "create_document", "scope": "user", "title": "Launch plan", "path": "/docs/launch" }
-mcp__loomcycle__document  { "op": "create_chunk", "scope": "user", "document_id": "<id>", "parent_id": "<root>", "type": "decision", "title": "Ship date", "body": "## Ship date\n2026-07-01" }
-mcp__loomcycle__document  { "op": "query_chunks", "scope": "user", "document_id": "<id>", "type": "decision", "status": "open" }
+document  { "op": "create_document", "scope": "user", "title": "Launch plan", "path": "/docs/launch" }
+document  { "op": "create_chunk", "scope": "user", "document_id": "<id>", "parent_id": "<root>", "type": "decision", "title": "Ship date", "body": "## Ship date\n2026-07-01" }
+document  { "op": "query_chunks", "scope": "user", "document_id": "<id>", "type": "decision", "status": "open" }
 ```
+
+(`document` here is the MCP tool — in Claude Code it is exposed under the
+plugin's or the project's MCP server prefix.) Called this way there is no run:
+the session is the operator, so `scope: "tenant"` needs no agent grant, and
+`scope: "agent"` is the session's own synthetic agent rather than any agent you
+have in mind — use `user` or `tenant`.
 
 Also on HTTP (`POST /v1/_document`), gRPC (`Document` RPC), and the TS/Python
 adapters (`client.document(...)`). **Scope + tenant are resolved server-side from
@@ -389,9 +632,14 @@ the session) after upgrading the deployment** and the full typed surface appears
 - **`upsert_chunk` on create still requires `title`** (it delegates to
   `create_chunk`), and the error says `create_chunk: missing required field:
   title` — naming an op you did not call.
-- **The entity sidecar is not returned by `get_chunk`.** `class`, the two time
-  axes and `confidence` are readable via `graph_recall` or a `query_chunks` SQL
-  read against `chunk_memory_meta`.
+- **`get_chunk` returns the fact metadata as an `entity` block** (`retired`, the
+  time axes, `class`, `natural_key`, `confidence`, `source_quote`, `subject`, and
+  the verdict fields once judged). A plain document chunk has no `entity`.
+  `list_facts` returns the same block; times are unix nanoseconds.
+- **The default scope is `user`**, and Path's is `agent`. Pass `scope` on both.
+- **Unix nanoseconds here, RFC3339 on `memory`.** `valid_at`, `invalid_at`,
+  `observed_at` and `as_of` are integers on this tool.
+- **`set_path` adds a name; it is not a move.** To rename, use `path` `op=mv`.
 
 Full runtime reference: the loomcycle `document` `Context op=help` topic and
 `docs/DOCUMENTS.md`; the backing store is `docs/SQL_MEMORY.md`.
