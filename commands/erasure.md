@@ -1,13 +1,13 @@
 ---
 description: Report what loomcycle holds about one subject, or erase it — three tiers, dry-run by default, with an honest account of what it cannot reach.
 argument-hint: "<report|execute> <subject> [--confirm]"
-allowed-tools: mcp__loomcycle__erasure
+allowed-tools: mcp__loomcycle__erasure mcp__plugin_loomcycle_loomcycle__erasure
 ---
 
 # loomcycle erasure
 
 Answers *"what does this deployment hold about this person"*, and removes what it
-can. Wraps the `erasure` meta-tool (loomcycle v1.45.0+).
+can. Wraps the `erasure` tool of the loomcycle MCP server.
 
 Parse `$ARGUMENTS`:
 
@@ -53,6 +53,11 @@ the numbers as complete.
 Only pass `dry_run: false` when the user said `--confirm`. If they asked to erase
 someone without it, run the dry run, show what would go, and ask. This is
 irreversible.
+
+A deployment can refuse a live run when it has no audit log to record it in:
+the HTTP route answers `audit_unavailable` and names `LOOMCYCLE_AUDIT_LOG_PATH`.
+An erasure cannot be undone, so it is not performed unless who did it can be
+recorded. Relay the refusal; do not look for another way to delete.
 
 ## ⚠️ The residue report is one-shot — keep the response
 

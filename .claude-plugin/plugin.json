@@ -1,8 +1,8 @@
 {
   "name": "loomcycle",
   "displayName": "loomcycle",
-  "version": "1.9.0",
-  "description": "Drive a loomcycle agentic runtime from inside Claude Code \u2014 spawn/cancel/list runs, snapshot, evaluate, inspect memory, mint multi-tenant operator tokens, import .claude/ repos, configure volumes (RFC AH) + the Bashbox sandbox (RFC AJ), author the Path VFS (RFC AL) + chunked-graph Documents (RFC AK) including the bi-temporal entity tier and the tenant ontology (RFC BL), store encrypted per-tenant credentials (RFC AR \u2014 CredentialDef / $cred: / provider-key override) and observe per-scope token budgets + usage/cost (RFC AW / AV), all via slash commands and skills over loomcycle's bundled MCP server.",
+  "version": "1.10.0",
+  "description": "Drive a loomcycle agentic runtime from inside Claude Code \u2014 spawn, fan out, retune, review and cancel runs, ask a decision model, snapshot, evaluate, read and write memory and documents, mint multi-tenant operator tokens, import .claude/ repos, and configure providers, model aliases, volumes, sandboxes, credentials and token budgets, all via slash commands and skills over loomcycle's bundled MCP server.",
   "author": {
     "name": "Dennis Gubsky",
     "email": "dgubsky@waverleysoftware.com",
@@ -29,7 +29,7 @@
     "auth_token": {
       "type": "string",
       "title": "loomcycle bearer token",
-      "description": "Bearer for loomcycle's /v1/* endpoints, sent by the thin client to the upstream runtime (as LOOMCYCLE_MCP_UPSTREAM_TOKEN). Its principal governs what the plugin can do: an admin token \u2192 full authority; a substrate:tenant or config-declared-principal (RFC AO) token \u2192 confined to that tenant (admin-only commands like operator-token / snapshot are unavailable; RFC AG). Use the SAME declared-principal token for the Web UI login and this field so the plugin and the UI act as one identity. Stored in your OS keychain, never in the repo.",
+      "description": "Bearer for loomcycle's /v1/* endpoints, sent by the thin client to the upstream runtime (as LOOMCYCLE_MCP_UPSTREAM_TOKEN). Its principal governs what the plugin can do: an admin token \u2192 full authority; a substrate:tenant or config-declared-principal token \u2192 confined to that tenant (admin-only commands like operator-token / snapshot are unavailable); a narrower token needs runs:create to start runs and runs:read to read them. Use the SAME declared-principal token for the Web UI login and this field so the plugin and the UI act as one identity. Stored in your OS keychain, never in the repo.",
       "sensitive": true
     },
     "base_url": {

@@ -1,5 +1,5 @@
 ---
-description: Send a steering message to a live interactive run — push operator text into a parked or running interactive agent session (RFC AI, loomcycle ≥ v1.1.1).
+description: Send a steering message to a live interactive run — push operator text into a parked or running interactive agent session.
 argument-hint: "<run_id> <text...>"
 allowed-tools: Bash
 ---
@@ -8,8 +8,8 @@ allowed-tools: Bash
 
 Parse `$ARGUMENTS`:
 
-- First token = `<run_id>` (the `run_id` from the original `spawn_run` response
-  or the `awaiting_input` event — looks like `r_…`).
+- First token = `<run_id>` (the `run_id` the run was started with — from
+  `/loomcycle:run`, `/loomcycle:runs` or `get_run`. Not the `agent_id`).
 - Everything after = the steering text to inject.
 
 If either is missing, stop and ask the operator.
@@ -54,7 +54,7 @@ string yourself** — pass it as an argument to python3 or `jq`, never with
 | `200` `{"run_id":"…","delivered":true}` | Steering delivered | Report delivered; the run will continue on its next iteration |
 | `404` | No live run for that `run_id` | The run may have completed, been cancelled, or the id is wrong. Offer to list recent runs with `/loomcycle:runs`. |
 | `429` | Run input queue full | Retry in ~1s (the `Retry-After: 1` header confirms). |
-| `503` | Steering not enabled on this server | The runtime wasn't started with steer registry support — unlikely on v1.1.1+. |
+| `503` | Steering not enabled on this server | The runtime has no steering registry wired. Report it; a retry will not help. |
 | `422` | Empty text | The steering text was empty after trimming. Ask the operator for non-empty input. |
 
 Report the `run_id` and whether the text was `delivered`. On success, note that
@@ -63,8 +63,30 @@ the run's stream will emit the steered response (the operator can watch it via
 
 ## Context
 
-Steering is for **interactive runs** — started with `"interactive": true` on
-`POST /v1/runs`. An interactive run parks at `end_turn` (emitting an
-`awaiting_input` SSE event) instead of completing, then resumes when a steer
-arrives. Non-interactive runs ignore steering and return 404. Full reference:
-`skills/loomcycle-configure/reference/interactive.md`.
+Steering is for **interactive runs**. An interactive run parks at the end of each
+turn (its `get_run` status is `running` with `awaited_state: "input"`) instead of
+completing, then resumes when a steer arrives. A run that is not interactive
+answers 404.
+
+There are three ways a run becomes interactive:
+
+- started that way: `/loomcycle:run <agent> --interactive …` (which starts it
+  detached, so this session is not held open);
+- promoted while it is going: `/loomcycle:retune <agent_id> --interactive`, which
+  parks it at its next turn boundary. This is the usual case, since nobody knows
+  at start that a run will need correcting;
+- started over HTTP with `"interactive": true` on `POST /v1/runs`.
+
+**Steering itself has no MCP tool.** It is the HTTP route above, which is why
+this command uses `curl`. The route needs the `runs:create` scope. Three
+neighbours that are MCP tools, and are not steering:
+
+- `/loomcycle:retune` changes a run's settings and sends it no message;
+- `/loomcycle:review` rules on an answer that is held for review;
+- `interruption_resolve` answers a question the agent itself asked.
+
+To stop only the turn an interactive run is in, and leave it parked with its
+transcript intact, there is also an HTTP-only route: `POST
+/v1/runs/{run_id}/cancel`. `/loomcycle:cancel` ends the whole run instead.
+
+Full reference: `skills/loomcycle-configure/reference/interactive.md`.

@@ -1,20 +1,20 @@
 ---
-description: Compact a parked loomcycle run's conversation — summarize its history to free context, then continue (loomcycle ≥ v0.32.0).
+description: Compact a parked loomcycle run's conversation — summarize its history to free context, then continue.
 argument-hint: "<agent_id> [--reason=<text>]"
-allowed-tools: mcp__loomcycle__compact_run
+allowed-tools: mcp__loomcycle__compact_run mcp__plugin_loomcycle_loomcycle__compact_run
 ---
 
 # Compact a loomcycle run
 
 Summarize a run's conversation history to reclaim context, then continue from
-the summary. Wraps `mcp__loomcycle__compact_run` (loomcycle ≥ v0.32.0). Parse
+the summary. Wraps the `compact_run` tool of the loomcycle MCP server. Parse
 `$ARGUMENTS`:
 
 - First token = `<agent_id>` (the run's tracking handle from `/loomcycle:run`
   or `/loomcycle:runs`). The tool resolves it to the run.
 - Optional `--reason=<text>` = a free-text note (audit only).
 
-Call `mcp__loomcycle__compact_run`:
+Call `compact_run`:
 
 ```json
 { "agent_id": "<agent_id>", "reason": "<reason if given>" }
@@ -35,3 +35,8 @@ short summary, interpreting `applied`:
 
 Report the token delta (`before_tokens → after_tokens`). If `<agent_id>` is
 missing, ask for it rather than guessing.
+
+A run whose agent keeps structured state (`context.mode: stateful`) is refused
+with `stateful_run`: its context is bounded by eviction, not by summarising, so
+there is nothing to compact. `compact_run` needs the `runs:create` scope on the
+plugin's token.

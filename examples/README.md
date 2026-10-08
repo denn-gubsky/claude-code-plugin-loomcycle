@@ -19,7 +19,9 @@ the stdio client. It keeps the server name `loomcycle`, so all the
 slash commands work unchanged — they now run under the token's principal:
 
 1. Mint a scoped token (from an admin operator):
-   `/loomcycle:operator-token create --name=acme-ide --tenant=acme --scopes=runs:create`
+   `/loomcycle:operator-token create --name=acme-ide --tenant=acme --scopes=runs:create,runs:read`
+   (`runs:create` alone can start a run and cannot read it back; `--scopes` is
+   required, and an omitted list is refused)
 2. Store that `lct_…` plaintext in the plugin's `auth_token` userConfig (keychain).
 3. Set `base_url` to the loomcycle instance's HTTP address.
 4. Replace the plugin's `.mcp.json` contents with this file (or override the
@@ -27,20 +29,19 @@ slash commands work unchanged — they now run under the token's principal:
 
 Now `/loomcycle:run`, `/loomcycle:runs`, etc. cannot widen beyond the token's
 tenant/scopes — loomcycle's `applyPrincipal` overrides any wider wire value, and
-under-scoped calls get a `scope` refusal. Do **not** define both a stdio and an
+a tool the token's scopes do not cover is absent from the session's tool list. Do **not** define both a stdio and an
 HTTP `loomcycle` server: a second server name (e.g. `loomcycle-http`) would not
 back the `mcp__loomcycle__*` commands, and two servers named `loomcycle` is
 invalid. It is a swap, not an addition.
 
-> **Requires the RFC AG route flip.** A `substrate:tenant` token only opens
-> `/v1/_mcp` on a loomcycle build where the route is `substrate:tenant` (RFC AG,
-> post-v1.4.0). On an older build the route is still `substrate:admin` and a
+> **Requires loomcycle ≥ v1.5.0.** A `substrate:tenant` token only opens
+> `/v1/_mcp` on a build where the route admits it. On an older build the route is still `substrate:admin` and a
 > tenant token 403s — use an admin token or upgrade loomcycle.
 
-## Declared-principal token (RFC AO) — one token for the UI *and* the plugin
+## Declared-principal token — one token for the UI *and* the plugin
 
 You don't have to **mint** an `OperatorTokenDef` to get a confined token. With
-loomcycle RFC AO you can **declare** a stable login in `loomcycle.yaml` and bind
+loomcycle ≥ v1.5.0 you can **declare** a stable login in `loomcycle.yaml` and bind
 it to a secret in `.env.local`:
 
 ```yaml

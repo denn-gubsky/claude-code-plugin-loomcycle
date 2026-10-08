@@ -6,7 +6,7 @@ allowed-tools: Bash(loomcycle import claude-code*) Bash(loomcycle validate*)
 
 # Import a .claude/ repo into loomcycle
 
-Guide the operator through RFC C2's `loomcycle import claude-code` CLI without
+Guide the operator through the `loomcycle import claude-code` CLI without
 them having to remember its flags. This wraps the **CLI**, not an MCP tool —
 the importer is a loomcycle subcommand.
 
@@ -36,17 +36,24 @@ Steps:
      reusable recipe JSON to the overlay.
    - `--skills-dest=<dir>` for where SKILL.md files land.
 
-4. **Write when they're ready.** Re-run with `--write` (add `--force` only if
+4. **Preview the change.** `--dry-run --diff=<loomcycle.yaml>` prints the yaml
+   diff against their config without touching it. Show it.
+
+5. **Write when they're ready.** Re-run with `--write` (add `--force` only if
    they accept clobbering existing entries), targeting their config:
 
    ```bash
    loomcycle import claude-code --from=<path> --write --diff=<loomcycle.yaml>
    ```
 
-5. **Validate the result.** Run `loomcycle validate <loomcycle.yaml>` and
+6. **Validate the result.** Run `loomcycle validate <loomcycle.yaml>` and
    report the outcome. A "no provider resolved" error is expected if the
    operator hasn't wired tier→provider→model policy yet — that's a config step,
    not an import defect; point them at their `user_tiers` config.
+
+   `validate` printing `OK` does not prove the agents have tools. The agent
+   key is **`tools:`**; a config still carrying the old `allowed_tools:` loads
+   clean and gives every agent an empty allowlist. Check the written yaml.
 
 This skill moves **authoring content** into loomcycle (the data-movement
 direction). It is the counterpart to this plugin's runtime-control commands —

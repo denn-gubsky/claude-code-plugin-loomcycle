@@ -1,4 +1,4 @@
-# Bashbox reference — RFC AJ (v1.3.0+)
+# Bashbox reference — RFC AJ (v1.3.0+; checked against v1.107.0)
 
 `Bashbox` is a **TRUE in-process shell sandbox** — the isolated alternative to
 the `Bash` tool. It runs shell commands via [gbash](https://github.com/ewhauser/gbash)
@@ -12,12 +12,14 @@ Opt-in exactly like Bash, in two layers:
 1. **`LOOMCYCLE_BASHBOX_ENABLED=1`** — the operator env flag (per deployment).
 2. **`tools: [Bashbox]`** — the per-agent gate.
 
-Stateless per call (no shell state persists between invocations).
+Stateless per call (no shell state persists between invocations). Input:
+`command` (required; use paths relative to the volume root), `volume` (optional),
+and `timeout_seconds` (optional per-call cap, ceiling 300 s). A non-zero exit is
+returned as an error with the output kept.
 
 > Bashbox is an **in-band** tool — an agent calls it during a run. It is **not**
-> an MCP meta-tool, so (unlike `Path`/`Document`) there's no direct
-> `mcp__loomcycle__bashbox` you can call from Claude Code; you enable it and let
-> agents use it. Reach for it from a `system_prompt`, an `AgentDef`, or a
+> an MCP meta-tool, so (unlike `path`/`document`) there is no `bashbox` tool you
+> can call from Claude Code; you enable it and let agents use it. Reach for it from a `system_prompt`, an `AgentDef`, or a
 > `loomcycle.yaml` agent block.
 
 ---
@@ -77,7 +79,13 @@ LOOMCYCLE_BASHBOX_FALLBACK_COMMANDS=git,gh
 # Credentials those host commands may see (injected into the host child ONLY,
 # never the sandbox env — the model can't read them via `env`):
 LOOMCYCLE_BASHBOX_FALLBACK_ALLOWED_ENV=GH_TOKEN,HOME,SSH_AUTH_SOCK
+# Per-tenant counterpart: stored credentials (by name, see credentials.md) resolved
+# for the run's own tenant/user/agent and injected the same way. A resolved
+# credential overrides a same-named host env var. Needs LOOMCYCLE_SECRET_KEY.
+LOOMCYCLE_BASHBOX_FALLBACK_ALLOWED_CREDS=GITHUB_TOKEN
 ```
+
+`PATH` always passes to a fallback command.
 
 How it stays contained:
 
@@ -107,6 +115,25 @@ value in any file (SKILL.md safety rule #2). The plugin never reads `.env.local`
   `HTTP`/`WebFetch`/`WebSearch` tools (host-allowlisted), not Bashbox.
 - Like every exec/file tool, Bashbox refuses entirely if the agent has **no**
   volume binding (sandbox-by-default, RFC AH Phase 3).
+
+---
+
+## When the agent needs a real toolchain
+
+Bashbox has no compilers, interpreters or package managers, and the default
+`denngubsky/loomcycle` image is distroless, so `Bash` has no `/bin/sh` there
+either. Two operator options, traded off on isolation:
+
+| Option | What it is | Use when |
+|---|---|---|
+| `denngubsky/loomcycle-toolbox` image | The same loomcycle binary on a Debian base with Python, Go, Rust, C/C++, Node + npm, `git`, `gh`, `curl` baked in. Code runs **inside loomcycle's own container** — no per-command sandbox | A trusted, single-tenant deployment |
+| Builder-sidecar sandbox | Each session runs in a separate, ephemeral container (network off by default, read-only rootfs, resource caps). loomcycle drives it over HTTP-MCP: enable `LOOMCYCLE_PRESETS=base,sandbox,dev-exec`; the tools are `mcp__sandbox__sandbox_open` / `_exec` / `_write` / `_read` / `_close` / `_list` | Untrusted code, or a multi-tenant deployment |
+
+A headless browser for web-UI testing (`mcp__browser__*`) needs the runtime run
+as the `denngubsky/loomcycle-browser` image plus a `pinchtab/pinchtab` sidecar,
+and the sidecar sandbox also needs `LOOMCYCLE_CODE_AGENTS_ENABLED=1` for its
+`dev/exec` agent. Setup for all three is in the
+loomcycle repo's `docs/TOOLBOX_IMAGE.md` and `docs/SANDBOX.md`.
 
 See the loomcycle `bashbox` `Context op=help` topic and `docs/TOOLS.md` for the
 runtime-side detail.
