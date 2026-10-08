@@ -209,9 +209,10 @@ agent `tools`:
   `History` or `Evaluation` with no scope list resolves to what the caller
   already owns — `memory_scopes` → `user` (+ `tenant` for a non-isolated
   member), `history_scope` → `user`, `sql_scopes` → `["user"]`,
-  `evaluation_scopes` → `["submit_self"]`. **For this profile, write the gates
-  explicitly**: `memory_scopes: ["-*"]` (and `history_scope` / `sql_scopes`
-  `["-*"]`) grants nothing; an empty list cannot express that.
+  `evaluation_scopes` → `["submit_self"]`. **For this profile, give an agent only the tools it
+  needs**: an agent that should hold no memory gets no `Memory` in `tools:`. The
+  deny-all value `["-*"]` fails static config load; it is accepted only on an
+  `AgentDef` create/fork overlay.
 
 `loomcycle validate`, `loomcycle doctor` and boot print an advisory for each
 unset or inert gate (e.g. "`Channel` is in this agent's tools but

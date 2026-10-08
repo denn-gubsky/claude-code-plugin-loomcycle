@@ -150,8 +150,9 @@ default 10000, `_STATEMENT_TIMEOUT_MS` default 30000, `_TXN_TIMEOUT_MS` default
 > `Memory` in `tools` and **no** `memory_scopes:` list resolves to what the
 > caller already owns: `user`, plus `tenant` for a non-isolated member (and to
 > nothing for a run with no user id). A declared list is authoritative and never
-> widened. To grant nothing, say so: `memory_scopes: ["-*"]` (an empty list
-> cannot mean that). The same default applies to `history_scope` (`user`),
+> widened. To grant nothing in a static agent, leave `Memory` out of `tools:`:
+> `["-*"]` fails config load there and is accepted only on an `AgentDef`
+> create/fork overlay. The same default applies to `history_scope` (`user`),
 > `sql_scopes` (`["user"]`) and `evaluation_scopes` (`["submit_self"]`).
 > `loomcycle validate` prints an advisory for an unset gate.
 

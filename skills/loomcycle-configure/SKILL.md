@@ -45,7 +45,7 @@ The six deployment profiles the operator may ask about are points on a
    no longer deny-when-unset: an unset `memory_scopes` resolves to the caller's
    **own** data (`user`, plus `tenant` for a non-isolated member), `history_scope`
    to `user`, `sql_scopes` to `[user]`, and `evaluation_scopes` to
-   `[submit_self]`. Write `["-*"]` to grant none. Recommend the *narrowest*
+   `[submit_self]`. To grant none: in a static agent (yaml or `.md`), leave the tool out of `tools:` — `["-*"]` there fails config load. On an `AgentDef` create/fork overlay, `["-*"]` is accepted and grants nothing. Recommend the *narrowest*
    setting that works at every layer; never widen "to make it work."
    `loomcycle validate` and `doctor` print an advisory for each gate an agent's
    tools would hit.

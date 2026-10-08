@@ -44,8 +44,8 @@ For an *agent*, `tenant` requires the operator to have granted BOTH
 `memory_scopes` and `sql_scopes` with the `tenant` value — granting one and not
 the other is the usual cause of a refusal that looks like a bug. Unset grants
 resolve to the caller's own data (`memory_scopes` → `user`, plus `tenant` for a
-non-isolated tenant member; `sql_scopes` → `user`); `["-*"]` is the explicit
-deny.
+non-isolated tenant member; `sql_scopes` → `user`). The explicit deny, `["-*"]`,
+is accepted only on an `AgentDef` overlay; in static config it fails the load.
 
 ## Op families
 

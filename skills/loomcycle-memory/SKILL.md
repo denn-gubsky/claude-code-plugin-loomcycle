@@ -37,7 +37,8 @@ Rules that cause most confusion:
 - **Unset grants are not deny-all any more.** An agent holding `Memory` with no
   `memory_scopes` resolves to its caller's own data: `user` (plus `tenant` for a
   non-isolated member of a tenant). Unset `sql_scopes` resolves to `user` only.
-  A run with no `user_id` still gets nothing. The explicit deny is `["-*"]`.
+  A run with no `user_id` still gets nothing. The explicit deny `["-*"]` is
+  accepted only on an `AgentDef` overlay; static config rejects it.
 - **The defaults differ per tool.** `memory` requires `scope`; `document`
   defaults to `user`; `path` defaults to `agent`. A document created with no
   scope and then looked up in `path` with no scope is looked up in the wrong
