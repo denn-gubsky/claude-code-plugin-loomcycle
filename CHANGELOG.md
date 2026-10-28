@@ -4,6 +4,71 @@ All notable changes to this project are documented here. The format follows
 [Keep a Changelog](https://keepachangelog.com/) and the project adheres to
 [Semantic Versioning](https://semver.org/).
 
+## [1.11.0] — 2026-10-28
+
+**Brought up to loomcycle v1.126.0.** The runtime went from 54 to 66 MCP tools:
+it gained `identity`, `file`, `crypto`, `delete_run_tree`,
+`retention_override`, three team-channel tools, the four access-control tools
+and `clientdef`, and removed `directory`. Three new commands, four new
+reference pages, and the tool map, commands and existing pages checked against
+the v1.126.0 source. Version bump `1.10.0 → 1.11.0` (`plugin.json` +
+`marketplace.json`).
+
+### Added
+
+- **`/loomcycle:whoami`** (`identity op=whoami`): who the plugin's token acts
+  as, meaning tenant, subject, status (including `pending`), groups, sign-in
+  gate and the access-control lists that apply. `--tools` also lists the tools
+  the session may call.
+- **`/loomcycle:access`**: `check` / `explain` / `simulate` over `authz`, plus
+  `groups`, `policies` and `bindings` management over `groupdef`, `acldef` and
+  `aclbinding`. It simulates before writes that could lock people out.
+- **`/loomcycle:files <run_id>`** (`file`): `ls`, `stat`, `extract`, `import`
+  (with `headings`), `keep`, `rm`, `clear` on a run's inbox, and what it cannot
+  do from outside a run (`download`, `upload`, `transcribe`).
+- **Reference pages** in `loomcycle-configure`: `access-control.md` (rule lists,
+  groups, bindings, the `compat` → `shadow` → `enforce` rollout, live rules),
+  `identity.md` (users, the sign-in gates, `loomcycle login`, app sign-in, the
+  `Identity` tool, `Context op=self/can/reach`, `{{identity}}`), `files.md` (the
+  run inbox, the File tool, extraction, OCR, transcription, import) and `git.md`
+  (the Git tool, `git_remote`, credentials, signing, runtime-fetched sources).
+- **`loomcycle login` as an alternative to `auth_token`.** The v1.126.0 thin
+  client uses the OS-keychain token when `LOOMCYCLE_MCP_UPSTREAM_TOKEN` is empty.
+  Claude Code does not document what an unset userConfig expands to, so the
+  README and `/loomcycle:connect` say to confirm with `/loomcycle:whoami`.
+
+### Changed
+
+- **`reference/mcp-tools.md`**: `identity` replaces `directory`, and users are
+  no longer described as derived from run activity. New clusters: access
+  control, files a run produced, cryptography. Four ways to make a run go away
+  (`cancel_run`, `configured_run op=delete`, `delete_run_tree`, `erasure`). Team
+  decision states and a team's own channels. The run queue. The reach section
+  now has 54 tenant-confinable tools, 28 scope-gated (adding `runs:delete` and
+  `substrate:tenant` by name), three tools for an isolated token, eleven for an
+  agent-limited token, and access-control rules that remove tools even for an
+  admin.
+- **`/loomcycle:operator-token`**: the token restrictions from v1.112.0
+  (`--ttl`, `--agents`, `--overrides`, `--rate`, `--no-trace`), the
+  `runs:delete`, `llm:gateway` and `auth:manage` scopes, and a note on per-user
+  tokens issued by sign-in gates.
+- **`/loomcycle:run` / `/loomcycle:fanout`**: queued runs, the join timeout, the
+  new refusal codes (`acl_denied`, `acl_unavailable`, `restricted_token`,
+  `override_not_allowed`, `rate_limited`, `retention_none_unsupported`), and a
+  pointer to `/loomcycle:files` when a run produced files.
+- **`/loomcycle:connect`**: where the plugin's bearer comes from, and using the
+  token's own subject as `user_id`.
+- **Existing reference pages** (`env-vars`, `profiles`, `token-limits`,
+  `volumes`, `routing`) and the **`loomcycle-memory`** skill checked against
+  v1.126.0.
+
+### Fixed
+
+- `reference/bashbox.md` said the model cannot read Bashbox fallback
+  credentials. It can: an allowlisted command can be told to print its
+  environment. The page now says so and shows per-command binding and
+  `shell_credentials`.
+
 ## [1.10.0] — 2026-10-08
 
 **Brought up to loomcycle v1.107.0.** The plugin was last grounded around
