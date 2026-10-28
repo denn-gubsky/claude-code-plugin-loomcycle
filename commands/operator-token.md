@@ -1,6 +1,6 @@
 ---
 description: Mint, rotate, retire, or inspect loomcycle OperatorTokenDef bearer tokens — per-principal multi-tenant auth.
-argument-hint: "<create|rotate|retire|get|list> [--name=<n>] [--tenant=<id>] [--subject=<s>] [--scopes=a,b] [--def-id=<id>] [--grace=<sec>]"
+argument-hint: "<create|rotate|retire|get|list> [--name=<n>] [--tenant=<id>] [--subject=<s>] [--scopes=a,b] [--ttl=<sec>] [--agents=a,b] [--overrides=none|a,b] [--rate=<per_min>[/<burst>]] [--no-trace] [--def-id=<id>] [--grace=<sec>]"
 allowed-tools: mcp__loomcycle__operatortokendef mcp__plugin_loomcycle_loomcycle__operatortokendef
 ---
 
@@ -26,6 +26,23 @@ isolation become real boundaries. Wraps the `operatortokendef` meta-tool.
   **Required for `create`**: an omitted list is refused. It used to default to
   `[substrate:admin]`, which turned a mistyped key into a full-power token. If
   the operator gave no scopes, ask which they want; never fill in admin.
+- `--ttl=<sec>` — `ttl_seconds` (`create`). The token stops authenticating when
+  it runs out, and a rotate does not extend it. Refused for a token holding
+  `substrate:admin`. Omit for a token that never expires.
+- `--agents=a,b` — `agents` (`create`). Limits the token to starting these agents
+  as top-level runs, and to the run endpoints: definitions, team walks,
+  schedules, channels, memory, documents, credentials and the model gateways are
+  refused (`restricted_token`) whatever its scopes. An empty list is refused.
+- `--overrides=none` or `--overrides=a,b` — `overrides` (`create`). `"none"` locks
+  every per-run setting (model, provider, tier, effort, sampling, limits, …) for
+  runs this token starts; a list names the settings it may still set. A locked
+  setting is refused (`override_not_allowed`), never ignored.
+- `--rate=<per_min>[/<burst>]` — `rate: {per_minute, burst}` (`create`). Past it
+  a start is refused `rate_limited` with a time to wait.
+- `--no-trace` — `retention: "none"` (`create`). Every run this token starts is
+  a no-trace run: delivered to the caller, stored nowhere. No-trace runs refuse
+  everything that needs stored content (interactive, review, sessions, steering,
+  compaction, team walks).
 - `--def-id=<id>` — existing def id (target for `get`; alternative target for
   `rotate` / `retire`).
 - `--grace=<sec>` — rotation grace-window override (`rotate`); the old token
@@ -37,8 +54,15 @@ shape; render results as markdown, not raw JSON.
 ### `create` — mint a new token
 ```json
 { "op": "create", "name": "<n>", "tenant_id": "<id>",
-  "subject": "<s, optional>", "scopes": ["<scope>", …] }
+  "subject": "<s, optional>", "scopes": ["<scope>", …],
+  "ttl_seconds": <sec, optional>, "agents": ["<agent>", …],
+  "overrides": "none", "rate": {"per_minute": <n>, "burst": <m>},
+  "retention": "none" }
 ```
+Send only the restriction fields the operator asked for. A token that will
+leave your hands (a bridge, a CI job, a customer's machine) is the case for
+them: an expiry, an agent list and a locked override set make a leaked token
+worth little.
 Returns the def metadata **plus the token plaintext, shown ONCE**. The request
 field is `scopes`; the response echoes it as `allowed_scopes`. Sending
 `allowed_scopes` in a request is not the same key and is refused.
@@ -88,6 +112,9 @@ one.
 | `channel:publish` | Publish to a channel and acknowledge a cursor. |
 | `channel:read` | Subscribe to and peek a channel. |
 | `providers:operator-key` | Lets a run fall back to the operator's own provider API key. Matters only where the operator turned key restriction on; omit it to make a tenant bring its own key. |
+| `runs:delete` | Permanently delete a run tree (`delete_run_tree`). Implied by `substrate:tenant`; a member or isolated user has it only when granted at mint. |
+| `llm:gateway` | The raw model endpoints (LLM gateway, OpenAI-compatible chat and embeddings). Implied by `substrate:tenant`; an isolated user needs it by name. |
+| `auth:manage` | A sign-up website's user-management credential: the password gate's management API and user create/list/update/delete, across tenants, and nothing else. Minted **alone**. |
 
 Pass the **narrowest** set. Omitted scopes are not granted.
 
@@ -97,9 +124,15 @@ to one, and a token that lacks a tool's scope does not see that tool:
 | To use | The token needs |
 |---|---|
 | `/loomcycle:run`, `fanout`, `cancel`, `compact`, `retune`, `review`, `steer`, `decide` | `runs:create` |
-| `/loomcycle:runs`, and reading a run | `runs:read` |
-| memory, documents, paths, definitions | nothing beyond being a non-isolated token of the tenant |
+| `/loomcycle:runs`, `/loomcycle:files`, and reading a run | `runs:read` |
+| `/loomcycle:whoami`, memory, documents, paths, definitions | nothing beyond being a non-isolated token of the tenant |
+| `/loomcycle:access check` / `explain` / `simulate` | any token not limited to certain agents (it asks about itself) |
+| `/loomcycle:access` groups, policies, bindings | `substrate:tenant` |
 | `/loomcycle:operator-token`, `/loomcycle:snapshot` | `substrate:admin` |
+
+Access-control rules can narrow any of this further. An explicit deny bound to
+the token removes the tool from the session in every `LOOMCYCLE_ACL` mode, even
+for an admin; under `enforce`, anything no rule allows is refused too.
 
 So a token for day-to-day use from the IDE is `runs:create,runs:read` at the
 least, or `substrate:tenant` for the whole tenant surface. A token minted with
@@ -151,6 +184,14 @@ bearer and **restart Claude Code** so the MCP server (and the HTTP-authed
 auto-snapshot hook) picks up the new value — rotate within the grace window to
 avoid a gap. See the README's *Token rotation runbook*. Never write the new
 token to a file on the operator's behalf.
+
+## Not every bearer is an operator token
+
+Since v1.126.0 people and programs also get tokens through **sign-in gates**
+(`loomcycle login`, the Web UI, a bridge signing in as an external gate). Those
+are per-user tokens issued by the server, often with `authority: inherit`
+(scopes follow the user's current access mode). They are not managed here; see
+the `loomcycle-configure` skill's identity reference.
 
 If the op is missing or unrecognised, list the five ops and stop rather than
 guessing.

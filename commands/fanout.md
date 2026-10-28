@@ -75,7 +75,20 @@ Render the returned envelope as a markdown table, in index order:
   batch**. Show failed children inline (status + error); do not abort the table.
   A child that could not start is reported in its own slot in either mode.
 - For `detach`, there is no result text yet. Show the handles and say how to
-  read them.
+  read them. A child may report `status: "queued"`: the runtime queues runs it
+  cannot start at once (v1.113.0+), and the child starts on its own.
+- In `join` mode, the server stops waiting at `LOOMCYCLE_BATCH_JOIN_TIMEOUT`
+  (default 1h, v1.120.0+). A child still going then comes back `running` or
+  `queued` with an error like `join timed out …; the run goes on: read it by
+  run_id`. That child has **not** failed: it keeps running, and you read it
+  with `get_run`. A child that was **not yet admitted** when the bound hit is
+  withdrawn instead: it comes back `cancelled` with "join timed out … not
+  started" (or "withdrawn"). It never ran; re-spawn it if the work is needed.
+  A request's own `timeout_ms` likewise cancels the batch's unfinished
+  children.
+- Child-level refusals use the same codes as `/loomcycle:run`: `acl_denied`,
+  `restricted_token`, `override_not_allowed`, `rate_limited`. They are reported
+  in that child's slot.
 - Remind the operator each `agent_id` is a cancel handle
   (`/loomcycle:cancel <agent_id>`), and that the batch is capped at 32.
 
