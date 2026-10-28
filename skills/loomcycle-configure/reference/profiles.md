@@ -8,8 +8,8 @@ Cross-check every var against [env-vars.md](env-vars.md); routing yaml lives in
 [routing.md](routing.md). **Print env lines for the operator — never write their
 env file.** Never put a secret value in any file.
 
-Two things changed under every profile since these were first written (current
-as of **v1.107.0**):
+Things that changed under every profile since these were first written (current
+as of **v1.126.0**):
 
 - **Filesystem access is a YAML `volumes:` block, not env.** The
   `LOOMCYCLE_READ_ROOT` / `LOOMCYCLE_WRITE_ROOT` / `LOOMCYCLE_BASH_CWD` jail was
@@ -19,6 +19,16 @@ as of **v1.107.0**):
   the provider matrix, aliases and tiers; your own `--config` layers on top. The
   YAML skeletons below assume that (or your own `tiers:` — see routing.md).
   The agent tool-allowlist key is `tools:`.
+- **No credential = open mode, and open mode stays on loopback (v1.119.0).** A
+  server with no `LOOMCYCLE_AUTH_TOKEN`, no config `principals:` and no admin
+  operator token serves every route unauthenticated — and now **exits at boot**
+  if `LOOMCYCLE_LISTEN_ADDR` or `LOOMCYCLE_GRPC_ADDR` binds beyond loopback
+  (`0.0.0.0`, `:8787`, a LAN IP). Only `LOOMCYCLE_ALLOW_OPEN_MODE=1` overrides
+  that, for a throwaway test harness. **Declaring config `principals:` turns
+  authentication on** by itself (even one with an empty `token_env`).
+- **Install methods:** Homebrew, the Docker images, or a release tarball (or
+  build from a clone). **`go install …@version` no longer works (v1.122.0)** —
+  the module uses nested modules with `replace`.
 
 ---
 
@@ -45,7 +55,7 @@ binary uses one `.env.local`):
 
 ```bash
 LOOMCYCLE_LISTEN_ADDR=127.0.0.1:8787          # local only
-LOOMCYCLE_AUTH_TOKEN=<openssl rand -hex 32>   # set even locally; avoids the dev-mode warning
+LOOMCYCLE_AUTH_TOKEN=<openssl rand -hex 32>   # set even locally; open mode on loopback works but warns every 10 min
 ANTHROPIC_API_KEY=<from your secret store>    # at least one provider key
 
 LOOMCYCLE_PRESETS=base                        # embedded provider/tier matrix (or write your own tiers:)
@@ -131,7 +141,9 @@ volumes:
 ```
 
 Key differences from profile 1: `LISTEN_ADDR=0.0.0.0:8787` *inside* the
-container (port-mapped to `127.0.0.1` on the host); volumes point at
+container (port-mapped to `127.0.0.1` on the host) — which **requires**
+`LOOMCYCLE_AUTH_TOKEN` since v1.119.0 (a `0.0.0.0` bind with no credential
+refuses to boot); volumes point at
 **in-container** mounted dirs, not host paths; config mounted read-only. SQLite
 or Postgres. No host filesystem is reachable.
 
@@ -280,10 +292,19 @@ principals:
 
 Tenant names must match `[a-zA-Z0-9_-]{1,64}`; an unknown scope or a non-admin
 principal with no `tenant:` fails config load; an empty `token_env` leaves the
-principal inert (a warning).
+principal inert (a warning). Declaring any principal turns authentication on
+(v1.119.0) — a request without a valid bearer gets `401`.
 
-**Sharp edges:** never leave `LOOMCYCLE_AUTH_TOKEN` empty on a server (dev-mode =
-open). Put TLS at the proxy; loomcycle speaks plain HTTP.
+On SIGTERM the server pauses in-flight runs for up to
+`LOOMCYCLE_SHUTDOWN_PAUSE_TIMEOUT_MS` (default 7000, v1.119.0) and resumes them
+on restart — raise it together with your platform's stop grace period for slow
+models.
+
+**Sharp edges:** never leave a server without a credential — since v1.119.0 a
+non-loopback listener with no `LOOMCYCLE_AUTH_TOKEN` / `principals:` / admin
+token refuses to boot rather than run open. Put TLS at the proxy; loomcycle
+speaks plain HTTP (set an `https://` `LOOMCYCLE_PUBLIC_URL` so the Web UI's
+session cookie is `Secure` behind it).
 
 ---
 
@@ -303,14 +324,32 @@ Postgres is required once you add replicas):
 LOOMCYCLE_STORAGE_BACKEND=postgres
 LOOMCYCLE_PG_DSN=postgres://loomcycle:…@db:5432/loomcycle?sslmode=require
 
-LOOMCYCLE_OPERATOR_TOKEN_PEPPER=<openssl rand -hex 32>   # set this — DB-dump defense
+LOOMCYCLE_SECRET_KEY=<openssl rand -base64 32>            # credential store KEK; also derives the token pepper (v1.119.0); secret
+# LOOMCYCLE_OPERATOR_TOKEN_PEPPER=<openssl rand -hex 32>  # optional explicit pepper; overrides the derived one
 LOOMCYCLE_AUDIT_LOG_PATH=/var/log/loomcycle/audit.jsonl   # also REQUIRED for subject erasure (disabled without it)
 LOOMCYCLE_AUTH_CACHE_TTL_SECONDS=30                       # 0 for immediate revocation
 LOOMCYCLE_OPERATOR_TOKEN_ROTATION_GRACE_SECONDS=86400
 LOOMCYCLE_AUTH_VERBOSE=1                                  # server-side reason on 401s (wire stays opaque)
-LOOMCYCLE_SECRET_KEY=<openssl rand -base64 32>            # tenant credential store (bring-your-own keys); secret
 # LOOMCYCLE_OPERATOR_KEY_RESTRICTION=1                    # tenants without providers:operator-key must use their own key
+# LOOMCYCLE_USER_TOKEN_MAX_TTL_SECONDS=86400              # cap per-user token life (v1.112.0)
+# LOOMCYCLE_LIMITS_ENFORCE=strict                         # hard budgets also stop runs in flight (v1.112.0)
+# LOOMCYCLE_RUN_RATE_PER_MINUTE=60                        # default run-start rate for tokens with none (v1.112.0)
+# LOOMCYCLE_ACL=compat                                    # access-control rollout: compat → shadow → enforce (v1.122.0)
 ```
+
+**Token hashes are peppered by default (v1.119.0).** With
+`LOOMCYCLE_SECRET_KEY` set and no explicit `LOOMCYCLE_OPERATOR_TOKEN_PEPPER`,
+the pepper is derived from the key; with neither, hashes are unpeppered and boot
+warns. Consequences: upgrade every replica together (older releases cannot read
+the new hash forms); rolling back means re-minting every operator token; and
+removing or changing `LOOMCYCLE_SECRET_KEY` without `LOOMCYCLE_SECRET_KEY_PREVIOUS`
+logs every operator token out. **Upgrading from a release before v1.119.0
+straight to a later one:** pre-pepper token rows are refused at login until you
+run **`loomcycle tokens rewrap`** (v1.120.0) with the server's own config and
+env — it first lists the unpeppered rows (writes nothing), then
+`loomcycle tokens rewrap --def-id <def_id>@<fingerprint>` (or
+`--all-listed <digest>`) moves the rows you recognise. Retire any row you did
+not mint instead. The legacy `LOOMCYCLE_AUTH_TOKEN` keeps working meanwhile.
 
 Mint per-tenant tokens (admin bearer required); the token's `subject` becomes
 the run's `user_id` (fairness key) and its `tenant_id` is the memory-isolation
@@ -338,10 +377,64 @@ The closed scope catalog (an unknown scope is refused):
 |---|---|
 | `runs:create` / `runs:read` | Create/continue runs · read runs, agents, sessions. |
 | `channel:publish` / `channel:read` | Publish/ack · subscribe/peek on the channel surface. |
-| `substrate:user` | **Isolated member.** Its own runs only (implies `runs:create` + `runs:read`), confined to its own user scope: no tenant-shared or global data, no other user's runs, no channel scopes, no def authoring. Over `/v1/_mcp` it may call only `credentialdef` (its own `scope=user` credentials). |
+| `substrate:user` | **Isolated member.** Its own runs only (implies `runs:create` + `runs:read`), confined to its own user scope: no tenant-shared or global data, no other user's runs, no channel scopes, no def authoring. Over `/v1/_mcp` it may call only `credentialdef` (its own `scope=user` credentials) and, since v1.122.0, `authz` (its own access questions). |
 | `substrate:tenant` | **Tenant operator.** Full power *within its own tenant*: runs, channels, authoring every substrate def (agents, skills, teams, hooks, MCP servers, schedules, webhooks…), and a tenant-confined `/v1/_mcp` session. Implies the four `runs:*` / `channel:*` scopes and `providers:operator-key`. No minting, no runtime admin, no cross-tenant access. |
 | `substrate:admin` | **Superuser** — every scope, token minting, runtime admin (pause/resume/snapshot/reload), cross-tenant focus. Never implicit; ask for it by name. |
 | `providers:operator-key` | Lets a run fall back to the operator's host provider key. Inert unless `LOOMCYCLE_OPERATOR_KEY_RESTRICTION=1`. To make a tenant pay its own way: set the gate, mint its tokens with granular scopes that omit this one (e.g. `runs:create,runs:read`), and give the tenant its own key as a CredentialDef ([credentials.md](credentials.md)); a restricted run with no usable key gets `403 operator_key_restricted`. |
+| `runs:delete` | **(v1.112.0)** Delete a run tree (`delete_run_tree`, `DELETE /v1/runs/{id}/tree`). Tenant-implied; a member or isolated user has it only when granted by name. |
+| `llm:gateway` | **(v1.112.0)** The raw model endpoints (`/v1/_llm/chat`, `/v1/chat/completions`, `/v1/embeddings`) — metered and budget-checked. Tenant-implied and admitted for a non-isolated member; an **isolated** user's token needs it by name. |
+| `auth:manage` | **(v1.123.0)** A website's user-management token (password gate + `/v1/_users`), across tenants and nothing else. Must be the token's only scope; refused over gRPC. See [identity.md](identity.md). |
+
+**Restricted tokens (v1.112.0)** — for a token handed to a machine you do not
+control. Each restriction is set at mint (`operator-token create`, the
+`operatortokendef` tool, `POST /v1/_users/{subject}/tokens`, a declared
+principal) and survives rotation:
+
+- **`ttl_seconds`** — a fixed life; rotation does not extend it, and a token
+  cannot mint one that outlives it. Not allowed on `substrate:admin`. The
+  per-user mint also takes `name` and `max_active`.
+- **`agents: [...]`** — may start only those agents as top-level runs, and is
+  held to the run endpoints on every transport (definitions, team walks,
+  schedules, gateways, channels, memory, documents, credentials, A2A →
+  `restricted_token`). Since v1.115.0 it also cannot steer, retune, cancel or
+  review other agents' runs, and (v1.119.0) reads only runs whose spawn-tree
+  root is on its list.
+- **`overrides: "none"`** (or a list of what it may still set) — locks model,
+  provider, tier, effort, limits, sampling, hooks… for runs it starts
+  (`override_not_allowed`). The agent-side twin is `allow_overrides: false` on
+  the definition.
+- **`rate: {per_minute, burst}`** — run starts (and steers) per user, per
+  replica (`429 rate_limited`, `Retry-After`).
+- **No-trace** — `retention: "none"` on the token makes every run it starts
+  deliver its output and store none of it (also settable per run or per agent;
+  strictest wins). Interactive, review, session-continuing and team-walk runs
+  are refused in this mode. `retention_override` (v1.112.0) temporarily stores
+  one no-trace agent's runs for debugging — never one a token requires.
+
+**People sign in through gates (v1.123.0 / v1.126.0).** The Web UI holds a
+server-side session (`auth.mode: token` or `strict`); OIDC, OAuth, password,
+header (Cloudflare Access / ALB / forward-auth), AWS IAM, device-code and
+external (signed-assertion, for bridges and apps) gates issue per-user tokens,
+and `loomcycle login` stores a terminal's token in the OS keychain (which
+`loomcycle mcp --upstream` uses when `LOOMCYCLE_MCP_UPSTREAM_TOKEN` is unset).
+External and device gates need `LOOMCYCLE_PUBLIC_URL`. See
+[identity.md](identity.md).
+
+**Access control (v1.122.0).** Per-user and per-group ACL rule lists, nested
+groups and bindings, explicit deny over allow, intersected with each agent's
+grants inside a run. Roll out with `LOOMCYCLE_ACL`: `compat` (default —
+nothing changes until you write a deny) → `shadow` (log every divergence) →
+`enforce`. See [access-control.md](access-control.md).
+
+**Runs queue instead of being refused (v1.113.0 / v1.114.0).** A run over
+`LOOMCYCLE_MAX_CONCURRENT_RUNS_PER_USER` or the global cap gets its row with
+status `queued` (cancellable, survives a restart), served round-robin across
+(tenant, user). Bounds: `concurrency.max_queue_depth` (32) and
+`LOOMCYCLE_MAX_QUEUED_RUNS_PER_USER` (16); past them `429 backpressure`.
+`admission: "reject"` on a request restores the old refuse-at-once answer.
+Session continuations and the LLM gateway queue too (v1.114.0). A token
+budget is checked before a run may queue and again when it starts. Details:
+[routing.md](routing.md).
 
 **MCP sessions are held to token scopes (v1.107.0).** A member token driving
 `/v1/_mcp` (the plugin's HTTP MCP transport or `loomcycle mcp --upstream`) needs
@@ -351,7 +444,12 @@ The closed scope catalog (an unknown scope is refused):
 for the read tools (`get_run`, `list_runs`, `stream_user_run_states`),
 `channel:publish` for `publish_channel` / `ack_channel` and `channel:read` for
 `subscribe_channel` / `peek_channel`. A token minted with only `runs:read` can
-no longer start runs over MCP. Stdio, admin, legacy and `substrate:tenant`
+no longer start runs over MCP. Tools added since (v1.108.0–v1.126.0): `file`
+and `evaluation` need `runs:read`; `delete_run_tree` needs `runs:delete`;
+`list_team_channels` / `peek_team_channel` need `channel:read` and
+`release_team_channel` needs `channel:publish`; `groupdef`, `acldef`,
+`aclbinding`, `clientdef`, `crypto` and `retention_override` need
+`substrate:tenant`; `identity` needs nothing beyond a non-isolated token. Stdio, admin, legacy and `substrate:tenant`
 sessions are unchanged.
 
 Routing: use `user_tiers:` privacy boundaries (routing pattern 4) so a tenant's
@@ -420,8 +518,18 @@ A **team walk does not move**: one left running by a stopped instance is ended
   **per-replica** — e.g. a cap of 10 × 2 replicas = 20 cluster-wide; per-user
   fairness (`LOOMCYCLE_MAX_CONCURRENT_RUNS_PER_USER`) IS cluster-wide.
 - MCP stdio children are per-replica — size memory for `N replicas × M servers`.
-- Token budgets, the auth-token cache, per-provider `max_concurrent` gates and
-  the `timeout_scaling` speed estimate are per-replica / advisory.
+- Token budgets, the auth-token cache, per-provider `max_concurrent` gates,
+  token run rates (`rate`, `LOOMCYCLE_RUN_RATE_PER_MINUTE`) and the
+  `timeout_scaling` speed estimate are per-replica / advisory.
+- Queued runs belong to a replica: at boot each replica restarts its own
+  queued runs. A queued run carrying per-run secrets needs
+  `LOOMCYCLE_SECRET_KEY` (same on every replica) to come back.
+- Upgrade every replica together when moving to v1.119.0+ with
+  `LOOMCYCLE_SECRET_KEY` set — an older replica cannot read peppered token
+  hashes.
+- Access-control sets are cached per replica for
+  `LOOMCYCLE_ACL_CACHE_TTL_SECONDS` (default 5) at worst; writes invalidate
+  over the cluster bus.
 - `anthropic-oauth-dev` and snapshot `--file` restore are per-host — use API
   keys and inline `raw_json` restore in a cluster.
 - Postgres is the single source of truth; no split-brain (an isolated replica is

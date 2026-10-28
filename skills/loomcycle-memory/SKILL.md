@@ -26,11 +26,19 @@ in the tenant**) · `run` (ephemeral, SQL only).
 
 Rules that cause most confusion:
 
-- **One scope per call.** A `user` recall or search never sees `tenant`
-  knowledge, and the reverse. To consult both, make two calls and merge by score.
+- **One scope per call — except documents.** A `user` recall or search never
+  sees `tenant` facts or notes, and the reverse; for those, make two calls and
+  merge by score. Document prose is the exception (v1.124.0): `search` and
+  `recall` take `documents_scope: agent | user | tenant`, which adds that scope's
+  documents as a second leg of the same call (one embedding, one ranking, one
+  `top_k`; each hit carries its `scope`). It needs the grants for that scope's
+  documents — for `tenant`, both `memory_scopes` and `sql_scopes`.
 - **`tenant` is a broadcast.** Anything written there is read by every agent and
   user in the tenant. Use it for curated reference material, never for anything
-  derived from untrusted text.
+  derived from untrusted text. (Since v1.116.0 the runtime's own memory paths —
+  consolidation, compaction, recap, the trace index — bank only the
+  conversation's dialogue, never tool output or other untrusted blocks. An
+  agent that deliberately `add`s or `set`s what it read is still on its own.)
 - **For an agent, `tenant` needs two grants**, `memory_scopes` AND `sql_scopes`,
   both including `tenant`. One without the other refuses in a way that looks like
   a bug.
@@ -39,6 +47,12 @@ Rules that cause most confusion:
   non-isolated member of a tenant). Unset `sql_scopes` resolves to `user` only.
   A run with no `user_id` still gets nothing. The explicit deny `["-*"]` is
   accepted only on an `AgentDef` overlay; static config rejects it.
+- **A scope can be read-only (v1.126.0).** An access-control `deny write` on
+  `memory:<scope>` or `sqlmem:<scope>` leaves reads working but refuses every
+  write there (`set`, `delete`, `merge`, `add`, `supersede`, `pending_ack`, the
+  cursor ops, `sql_exec`, `sql_begin`). `context` `op=permissions` lists them
+  under `read_only_scopes` / `sql_read_only_scopes`. Report the refusal; do not
+  write to another scope instead.
 - **The defaults differ per tool.** `memory` requires `scope`; `document`
   defaults to `user`; `path` defaults to `agent`. A document created with no
   scope and then looked up in `path` with no scope is looked up in the wrong
@@ -82,9 +96,18 @@ So:
   `{entries: [{key, kind, value, score, rank_score, …}]}`. A `set` row is only
   searchable if it was written with `embed: true`. Use it when you want the
   *rows*, need a key `prefix`, or want document chunks in the same result.
+  Both `search` and `recall` take document filters (v1.123.0) —
+  `under_paths`, `exclude_under_paths`, `document_ids`, `exclude_document_ids` —
+  which narrow document rows only (facts and notes pass untouched); one on a call
+  that cannot return documents is refused, never ignored. A `tenant`-scope
+  search can return tenant documents (v1.123.0) when it asks for them.
 - **`get` / `list`** — you know the key or the prefix. Cheapest, exact.
 - **`graph_recall`** (on `document`) — follows *relations* out from matching
-  facts. Use when the question is about connections, not text.
+  facts. Use when the question is about connections, not text. Since v1.123.0
+  it returns up to 600 characters of each ordinary chunk's `body`
+  (`body_truncated`; `body_chars` 0–4000, `0` for titles only) — facts stay
+  title-only — and leaves out chunks whose own validity period has ended or not
+  begun.
 
 ### What `recall` returns
 
@@ -185,6 +208,23 @@ halves can disagree if something is repaired out of band.
   If a document is missing content, suspect reachability before deletion.
 - `export_md` → `import_md` round-trips. Fenced code blocks are content, not
   structure, so a document containing Markdown samples survives the trip.
+- **Any chunk can carry a validity period (v1.123.0):** `valid_at` / `invalid_at`
+  (unix ns, half-open; `null` clears an end) on `create_chunk` / `update_chunk`
+  — a clause in force for a period without becoming a fact. `as_of` on
+  `search`, `related` and `query_chunks` honours it.
+- **Aim `search` / `related` at one corpus (v1.123.0):** filters `under_path(s)`,
+  `exclude_under_path(s)`, `document_id(s)`, `exclude_document_ids`, `type(s)`,
+  `status(es)`, `tag`, `tag_prefix`, `as_of`, applied inside every retrieval leg.
+  A filter too wide for the server's cap answers `filter_too_wide` — narrow it.
+- **Imported documents are not facts (v1.125.0).** Chunk bodies of a document
+  made by `File op=import` or `import_md` carry origin `import`: they appear under
+  `sources: ["documents"]`, never as facts. The root keeps a server-written
+  `provenance` (the captured file, its hash, where it came from, and an optional
+  `source` link); a caller cannot set it.
+- **Rename a document by its root chunk (v1.126.0):** `update_chunk` (or
+  `upsert_chunk` / `sync`) on the root's `title` renames the document everywhere
+  it is listed. The `path` name does not move — rename that with `path` if
+  wanted.
 - Every document gets a `path` — `/documents/<title>` when you pass none. A
   malformed `path` now **fails the create** and nothing is written (segments are
   letters, digits, `.`, `_`, `-`; no spaces).
@@ -252,6 +292,12 @@ The two things to carry into any answer:
    run deletes.** Afterwards a report shows `residue: 0` while those facts remain,
    and the tool marks tier 3 `UNDETERMINABLE`. **The execute response is the only
    durable record of what was not reached** — print it and say to keep it.
+3. **Tier 2 also removes the subject's access (v1.122.0):** their group
+   memberships and user ACL bindings, and it revokes their member tokens (an
+   erased user can no longer sign in and write new data). The report's `access`
+   field names what goes. Tokens holding `substrate:tenant` / `substrate:admin`,
+   group bindings and config-declared memberships are kept and named under
+   `retained` — the last must be removed from the config file.
 
 ## Diagnosing "the agent forgot"
 
@@ -269,7 +315,12 @@ Work down this list rather than guessing:
    the reason.
 7. **Unreachable, not deleted** — a document whose name was removed with
    `path op=rm` is still there by id.
-8. **A grant** — `memory_scopes` / `sql_scopes` not covering the scope asked for.
+8. **A grant** — `memory_scopes` / `sql_scopes` not covering the scope asked for,
+   or an access-control rule dropping the scope or a document path from the
+   caller's reach (a denied document is silently left out of search results).
+9. **Never banked** — the detail came from tool output (a web page, a webhook
+   body, an MCP result). Since v1.116.0 the background memory paths ignore
+   untrusted text; it is only in the chat (`history`).
 
 Surface refusal text verbatim. Never silently retry a different scope or op to
 make a call succeed — that turns a visible permission problem into a wrong answer.

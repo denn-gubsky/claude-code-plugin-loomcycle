@@ -1,6 +1,6 @@
 ---
 name: loomcycle-configure
-description: Configure a loomcycle runtime — providers, model tiers and aliases, model kinds (chat / decision / embedder) and decision models, user tiers, fallbacks, per-agent sampling, context retention and compaction, agent hooks and hook definitions, interactive runs and review holds, environment variables, deployment profiles (brew/in-system, containerized, true sandbox, server, multi-tenant, cloud), filesystem Volumes, the Bashbox in-process sandbox, the Path VFS, chunked-graph Documents, encrypted per-tenant credentials (CredentialDef / $cred: / provider-key override), per-scope token budgets and usage/cost attribution, inbound webhooks, and third-party MCP servers. Use when the user wants to set up or tune loomcycle.yaml or its env, pick a deployment posture, wire provider routing/cost-cascades, gate plans, tune decoding (temperature/top_p), context retention or compaction, add a decision model, gate an agent's tool calls with hooks, make runs interactive or hold their answers for review, lock down tool/sandbox/auth, enable or choose between Bash and the Bashbox sandbox (incl. its host-command fallback), name resources with Path, author chunked-graph Documents (and the SQL Memory they require), store tenant/user API keys or bring-your-own provider keys, set token budgets, receive webhooks, or connect external MCP tools.
+description: Configure a loomcycle runtime — providers, model tiers and aliases, model kinds (chat / decision / embedder) and decision models, user tiers, fallbacks, per-agent sampling, context retention and compaction, agent hooks and hook definitions, interactive runs and review holds, environment variables, deployment profiles (brew/in-system, containerized, true sandbox, server, multi-tenant, cloud), filesystem Volumes, the Bashbox in-process sandbox, the Path VFS, chunked-graph Documents, encrypted per-tenant credentials (CredentialDef / $cred: / provider-key override), access control (rule lists, groups, bindings), users and sign-in gates, the run inbox and File tool, the Git tool, per-scope token budgets and usage/cost attribution, inbound webhooks, and third-party MCP servers. Use when the user wants to set up or tune loomcycle.yaml or its env, pick a deployment posture, wire provider routing/cost-cascades, gate plans, tune decoding (temperature/top_p), context retention or compaction, add a decision model, gate an agent's tool calls with hooks, make runs interactive or hold their answers for review, lock down tool/sandbox/auth, enable or choose between Bash and the Bashbox sandbox (incl. its host-command fallback), name resources with Path, author chunked-graph Documents (and the SQL Memory they require), store tenant/user API keys or bring-your-own provider keys, set token budgets, receive webhooks, connect external MCP tools, write access-control rules (ACL lists, groups, bindings), set up sign-in gates (password, OIDC, OAuth, header/SSO proxy, AWS IAM, external/bridge, device login) and users, give agents the Identity tool, handle files tools return (run inbox, File tool, extraction, OCR, transcription), or give agents the Git tool.
 allowed-tools: Read Write Edit Bash(loomcycle validate*) Bash(loomcycle doctor*) Bash(loomcycle init*)
 ---
 
@@ -314,7 +314,77 @@ crossing, and a hard-over run is **refused at admission with `token_limit_exceed
 the Web UI **Usage** page — tokens + money by tenant/user/provider/model/source; reporting only, also
 not an MCP tool). **Full reference:** [reference/token-limits.md](reference/token-limits.md).
 
+## Access control — rule lists, groups, bindings — v1.122.0+
+
+Authority can be written **per user and per group**. Rule lists hold
+`{effect, actions, resources, when}` rules; groups nest (≤8 deep); bindings
+attach a list to a user, group, token or tenant. **An explicit deny beats any
+allow.** It is declared in yaml (`acls:` / `groups:` / `acl_bindings:`) or
+managed at runtime (MCP `acldef` / `groupdef` / `aclbinding`, the Web UI Access
+pages, `loomcycle acl`). Roll out through **`LOOMCYCLE_ACL`**: `compat` (the
+default; scope gates decide, explicit denies honoured), then `shadow`
+(disagreements logged as `acl_shadow_diverged`), then `enforce` (the rules
+decide; unreadable rules refuse). Inside a run the caller's rules are
+intersected with the agent's grants: tools withheld, volumes bound read-only,
+memory scopes dropped or made read-only. `LOOMCYCLE_ACL_LIVE=1` makes a running
+run follow rule changes. Check with `/loomcycle:access`.
+**Full reference:** [reference/access-control.md](reference/access-control.md).
+
+## Identity and sign-in — users, gates, the Identity tool — v1.123.0+
+
+Users are stored records (`active` / `disabled` / `pending`). People sign in
+through **gates**: `password`, `oidc`, `oauth`, `header` (Cloudflare Access, AWS
+ALB, forward-auth), `awsiam`, `external` (a program such as a chat bridge signs
+who is talking with its own key), and `device` (`loomcycle login`, which stores
+a token in the OS keychain that this plugin's thin client can use). Apps sign
+people in through loomcycle's own OAuth 2.0 server (`auth.clients:` /
+`clientdef`). Agents see who they work for: `Context op=self` (identity block),
+`op=can` / `op=reach`, the read-only `Identity` tool, and `{{identity}}` in a
+system prompt. MCP `identity` replaced `directory` in v1.126.0.
+**Full reference:** [reference/identity.md](reference/identity.md).
+
+## Files — the run inbox and the File tool — v1.122.0+
+
+Files a tool returns (MCP image/blob blocks, binary HTTP/WebFetch responses,
+opted-in base64) are kept in the run's **inbox** volume. The model sees a
+one-line `[file: …]` stub, never the bytes. **Needs a `dynamic_root` volume**;
+`inbox` is a reserved volume name. The `File` tool does `stat`, `ls`, `keep`,
+`rm`, `clear`, `download`, `upload`, `extract` (Office/HTML/PDF → Markdown, OCR
+opt-in), `transcribe` (speech-to-text, v1.125.0) and `import` (→ Document,
+`headings` v1.126.0). From Claude Code, `/loomcycle:files <run_id>` reaches a
+run's inbox. **Full reference:** [reference/files.md](reference/files.md).
+
+## Git tool — v1.122.0+
+
+`Git` does repository work in a bound volume through go-git. No `git` process,
+no repository-config code execution, and the push credential is held by the
+runtime, never shown to the model. Network ops need the agent field
+`git_remote` (`[fetch]` / `[fetch, push]`) and a host in
+`LOOMCYCLE_GIT_SOURCE_HOSTS` / `LOOMCYCLE_GIT_PUSH_HOSTS`. Commits can be signed
+through the Crypto tool. No rebase, cherry-pick, stash or non-fast-forward merge.
+**Full reference:** [reference/git.md](reference/git.md).
+
 ## Reference files (read on demand)
+
+- **[reference/access-control.md](reference/access-control.md)** — rule lists,
+  groups and bindings: the rule language and `acldef op=catalog`, yaml form,
+  the `compat` → `shadow` → `enforce` rollout, built-in lists per token class,
+  where checks happen (gates, per-instance, inside a run), live rules, refusal
+  codes. Read this for any "who may do what" / lock-down / group question.
+- **[reference/identity.md](reference/identity.md)** — users and sign-in: the
+  gate kinds and their config, `auth.mode`, external gates and the removal
+  lifecycle, tenant gate policy, `loomcycle login`, app sign-in and `ClientDef`,
+  frozen vs inherit token authority; the agent side (`Identity` tool,
+  `Context op=self/can/reach`, `{{identity}}`). Read this for any sign-in, SSO,
+  bridge, user-approval or "what does the agent know about its user" question.
+- **[reference/files.md](reference/files.md)** — the run inbox, capture caps,
+  `binary_results`, WebFetch assets, the File tool ops and grants, extraction,
+  OCR, transcription, import to Documents, the MCP `file` tool. Read this for
+  any "the agent got a file / PDF / attachment" question.
+- **[reference/git.md](reference/git.md)** — the Git tool: op table, `git_remote`
+  and host allowlists, credentials (`$cred:` / `$ghapp:`), signing, runtime-fetched
+  git sources, bounds, Git vs Bash with `shell_credentials`. Read this for any
+  repository-work question.
 
 - **[reference/routing.md](reference/routing.md)** — providers + API-key env
   vars, the 4-layer resolver precedence, `tiers` / `user_tiers` / `models:`

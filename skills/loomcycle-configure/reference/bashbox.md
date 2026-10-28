@@ -76,14 +76,22 @@ host shell**:
 ```bash
 # .env.insecure (names only — safe to commit/read; NOT secrets)
 LOOMCYCLE_BASHBOX_FALLBACK_COMMANDS=git,gh
-# Credentials those host commands may see (injected into the host child ONLY,
-# never the sandbox env — the model can't read them via `env`):
+# Credentials those host commands may see (injected into the host child, not the
+# sandbox env). The MODEL CAN STILL READ THEM: an allowlisted command can be told
+# to print its environment (`git -c alias.x='!env' x`), and the live tool result
+# carries the value. Give a shell only credentials you would hand the model.
 LOOMCYCLE_BASHBOX_FALLBACK_ALLOWED_ENV=GH_TOKEN,HOME,SSH_AUTH_SOCK
 # Per-tenant counterpart: stored credentials (by name, see credentials.md) resolved
 # for the run's own tenant/user/agent and injected the same way. A resolved
 # credential overrides a same-named host env var. Needs LOOMCYCLE_SECRET_KEY.
-LOOMCYCLE_BASHBOX_FALLBACK_ALLOWED_CREDS=GITHUB_TOKEN
+LOOMCYCLE_BASHBOX_FALLBACK_ALLOWED_CREDS=git:GITHUB_TOKEN   # bound to `git` only
 ```
+
+Bind each credential to the one command that needs it (`git:GITHUB_TOKEN`); a
+bare name reaches every allowlisted command. Narrow per agent with
+`shell_credentials:` (v1.122.0): `[]` gives its shell none of them. For git work
+that needs a token, the [Git tool](git.md) keeps it out of the model's reach
+entirely.
 
 `PATH` always passes to a fallback command.
 
