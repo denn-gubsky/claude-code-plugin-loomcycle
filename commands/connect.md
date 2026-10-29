@@ -40,3 +40,26 @@ Do this:
    `.gitignore` if it isn't already.
 
 If no flags are given, report the current active identity (or that none is set).
+
+**No `--user`?** The token itself names a user. `/loomcycle:whoami` shows the
+token's `subject`. For a per-user token (one issued by `loomcycle login`, the
+Web UI or a sign-in gate), that subject is the natural `user_id`, and
+`list_runs` for any other user is refused or comes back empty. Suggest it rather
+than inventing an id.
+
+**The plugin's own bearer** (what every tool call runs as) is not set here. It
+comes from, in order:
+
+1. the `auth_token` userConfig, if set (sent as `LOOMCYCLE_MCP_UPSTREAM_TOKEN`);
+2. otherwise, since loomcycle v1.126.0, the token `loomcycle login --url <base_url>`
+   stored in the OS keychain (macOS and Linux). The thin client uses it when
+   `LOOMCYCLE_MCP_UPSTREAM_TOKEN` is empty.
+
+Claude Code does not document what an unset `auth_token` expands to. If it
+reaches the thin client as an empty string, the keychain token is used. If it
+arrives as literal text, the runtime refuses that text as a bearer. So after
+`loomcycle login`, run `/loomcycle:whoami`. If tools fail with an
+authentication error, set `auth_token` instead.
+
+With neither, the thin client connects without a bearer, which only an
+open-mode runtime accepts.

@@ -1,4 +1,4 @@
-# Volume primitive reference — RFC AH (v1.1.0+; checked against v1.107.0)
+# Volume primitive reference — RFC AH (v1.1.0+; checked against v1.126.0)
 
 Volumes replaced the legacy env-var file jail (`LOOMCYCLE_READ_ROOT` / `WRITE_ROOT` / `BASH_CWD`)
 in **v1.1.0**. A volume is the *only* way an agent gets filesystem access: an agent bound to no
@@ -51,7 +51,8 @@ volumes:
     path: ./loomcycle-src
     mode: ro              # ro: Read/Grep/Glob (and Bashbox) work; Bash/Write/Edit refuse inside this volume
 
-  # REQUIRED when any agent uses VolumeDef (Phase 2a/2b).
+  # REQUIRED when any agent uses VolumeDef (Phase 2a/2b), and for the run inbox
+  # (v1.122.0: files tools return are kept there — without it they are not kept).
   # Create the directory before first server start: mkdir -p ./work/dynamic
   dynamic-root:
     path: ./work/dynamic
@@ -66,7 +67,7 @@ volumes:
 | `path` | Yes | string | Directory path. Absolute, or relative to the server launch cwd. Must already exist and be a directory at startup; the runtime never creates it. |
 | `mode` | No | `rw` \| `ro` | Omitted = `rw`. `rw` allows Read + Write + Edit + NotebookEdit + Bash. `ro` allows Read/Grep/Glob only; Write/Edit/NotebookEdit/Bash refuse. Bashbox is the exception: it accepts `ro` (writes land in an in-RAM overlay; see [bashbox.md](bashbox.md)). |
 | `default` | No | bool | If `true`, agents with no explicit `volumes:` list bind here, and a tool call that omits `volume` uses it. At most one volume may set this. |
-| `dynamic_root` | No | bool | Marks this volume as the backing store for VolumeDef-provisioned volumes. Required for Phase 2a/2b. At most one volume may set this. |
+| `dynamic_root` | No | bool | Marks this volume as the backing store for VolumeDef-provisioned volumes **and the run inbox** (v1.122.0). Required for Phase 2a/2b and for keeping files tools return. At most one volume may set this. |
 
 ### Per-agent binding
 
@@ -88,6 +89,18 @@ An agent that declares `volumes:` is confined to **exactly those** — it does n
 `default`. With no `default` volume declared, an agent with no `volumes:` list has no filesystem
 access at all. An agent reads its own bindings with `Context op=self` (`volumes.bindings`: name,
 path, mode, default).
+
+**Access control can narrow a binding (v1.122.0).** Under `LOOMCYCLE_ACL`, a volume the run's
+caller may not `write` (`volume:<name>`) is bound **read-only**, and one it may not `read` is
+**dropped** — reported once at run start as a `capability_inert` event (gate `acl`). Under
+`shadow` the binding is kept and the would-be narrowing only logged; with `LOOMCYCLE_ACL_LIVE=1`
+(v1.126.0) the narrowing also applies mid-run. See [access-control.md](access-control.md).
+
+**`Read` by line range (v1.113.0).** `Read` takes `offset` (first line, from 1), `limit`
+(lines) and `line_numbers`; any of them turns on line mode — whole lines and a closing line
+saying where it stopped (`[lines 1-2210 of 3044; cut at 256 KiB, continue with offset 2211]`).
+Without them `Read` returns the first 256 KiB as before. Useful on a read-only volume of code
+under review.
 
 ---
 
@@ -131,6 +144,7 @@ VolumeDef op=get    name="ws"                                 # get path + metad
 VolumeDef op=list                                             # list the tenant's dynamic volumes
 VolumeDef op=delete name="ws"                                 # unmap: remove the row, KEEP the files
 VolumeDef op=purge  name="ws"                                 # remove the row AND delete the directory tree
+VolumeDef op=set_mode name="ws" mode=ro                       # ephemeral only: make it ro for the whole run tree (one way; v1.113.0)
 ```
 
 `delete` and `purge` are not the same, and `purge` is not recoverable. `create` takes a **name and
@@ -138,7 +152,9 @@ a mode only** — never a host path. The runtime derives the location
 (`<dynamic_root>/<tenant>/<name>`, or `<dynamic_root>/_shared/<name>` for the shared tenant).
 Names must match `^[a-z0-9][a-z0-9_-]{0,63}$`. `create` is idempotent (same mode is a no-op, a
 different mode updates the mapping) and is refused for a name that collides with a static
-`volumes:` entry.
+`volumes:` entry. **`inbox` is reserved (v1.122.0)** — it names the run tree's file inbox (an
+ephemeral volume under the `dynamic_root`, made on the first captured file and purged with the
+tree), so `create` refuses it. See [files.md](files.md).
 
 The `create` result includes a `path` field — the absolute path the agent should pass to Bash
 (`git clone <url> <path>/repo`) and to sub-agents as `ephemeral_path=<path>`.
@@ -160,6 +176,28 @@ collide on a name. It needs an active run (refused outside one), and there is no
 `purge` for an ephemeral volume — its lifetime is the run. A sweeper purges the volumes of
 crashed runs (`LOOMCYCLE_EPHEMERAL_VOLUME_SWEEP_MS`, default 60 s; `0` disables the sweeper, not
 the purge at run end). A paused run keeps its ephemeral volumes.
+
+**Read-only scratch (v1.113.0).** `VolumeDef op=set_mode {name, mode: "ro"}` makes an ephemeral
+volume read-only for the whole run tree at once, children already running included (`rw` is
+refused). `ephemeral_volumes: ro` on an agent gives it, and every agent it spawns, all of the
+run's ephemeral volumes read-only (its own `volumes:` keep their modes; a fork cannot clear it).
+The mode holds across resume and replicas; `Context op=self` lists `ephemeral_volumes`.
+
+**A repository fetched by the runtime (v1.113.0).** `VolumeDef op=create` on an ephemeral volume
+can take a git source, so the forge token never enters a shell:
+
+```json
+{"op": "create", "name": "repo", "ephemeral": true, "mode": "ro",
+ "source": {"git": {"url": "https://github.com/acme/app", "commit": "<40-digit sha>",
+                    "credential": "$cred:repo-acme-app", "diff_base": "merge-base:default"}}}
+```
+
+Off unless `LOOMCYCLE_GIT_SOURCE_HOSTS` lists the host; the agent needs `source:git` in
+`volume_def_scopes` (`any` does not include it); a credential must carry `allowed_urls` covering
+the repository. Regular files only, no `.git`; `_meta/omitted.json` lists what was left out, and
+`diff_base` adds `_meta/diff.patch` + `_meta/numstat.json`. A failed clone leaves nothing. Limits
+are the `LOOMCYCLE_GIT_SOURCE_*` vars ([env-vars.md](env-vars.md)). For an agent that commits and
+pushes, see the `Git` tool in [git.md](git.md).
 
 **Important:** ephemeral volumes are scoped to the creating run, not to a specific sub-agent.
 If the dispatcher spawns 8 reviewers, all 8 can see the same ephemeral volume (via spawn
@@ -211,11 +249,14 @@ ls work/dynamic/    # should exist and be writable
 | `volumes.X: invalid mode "…" (want "rw", "ro", or empty for rw)` | Fix the mode. |
 | `volumes: at most one volume may be default:true` | Set `default: true` on exactly one volume. |
 | `volumes: at most one volume may be dynamic_root:true` | Mark exactly one volume `dynamic_root: true`. |
-| `agent "X": volume_def_scopes[N]: unknown scope "…" (want "any" or "named:<volume-name>")` | Use `any` or `named:<volume>`. |
+| `agent "X": volume_def_scopes[N]: unknown scope "…" (want "any" or "named:<volume-name>")` | Use `any` or `named:<volume>` (plus `source:git` for an agent that fills a volume from a git source). |
 
 Not config errors, but refusals at run time: `VolumeDef create` answers "no dynamic volume root
 configured" when no volume is marked `dynamic_root: true`, and every file/exec tool refuses when
-the agent is bound to no volume (no `default` volume and no `volumes:` list).
+the agent is bound to no volume (no `default` volume and no `volumes:` list). With no
+`dynamic_root`, a file a tool returns is not kept — the model sees `[file not kept: …]`. A git
+source with `LOOMCYCLE_GIT_SOURCE_HOSTS` unset answers `git_source_disabled`. Since v1.119.0 a
+traverse-only directory inside a volume (mode `0100`, or a `0300` drop box) is refused.
 
 ---
 

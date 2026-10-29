@@ -3,7 +3,7 @@
 This is the **`loomcycle.yaml` model-routing axis**. Authoritative source:
 loomcycle `docs/CONFIGURATION.md` + `docs/PROVIDERS.md` (+ `docs/DECISION-MODELS.md`
 for decision models). Field names below match loomcycle's config loader at
-**v1.107.0** — do not invent fields. Check any config you write with
+**v1.126.0** — do not invent fields. Check any config you write with
 `loomcycle validate <file>` (it prints agent-gate and model-kind advisories too).
 
 The agent tool-allowlist key is **`tools:`**. The old `allowed_tools:` key is
@@ -20,6 +20,7 @@ tools — so use `tools:` in every agent, yaml or `.md`.
 | `gemini` | `GEMINI_API_KEY` | generativelanguage.googleapis.com | Production. |
 | `ollama` | `OLLAMA_API_KEY` (Bearer) | `OLLAMA_CLOUD_BASE_URL` (default ollama.com) | Hosted Ollama (subscription billing). |
 | `ollama-local` | none (local trust) | `OLLAMA_BASE_URL` (default `http://localhost:11434`; `disabled` to opt out) | Local-network Ollama. |
+| `bedrock-claude` / `bedrock-openai` | AWS credentials (`auth:` block, standard AWS chain) | `bedrock-runtime.<region>.amazonaws.com` | **(v1.119.0)** Not built in — declared by the `bedrock` preset (`LOOMCYCLE_PRESETS=base,bedrock` + `LOOMCYCLE_BEDROCK_REGION`) or by your own `providers:` entry. See *Amazon Bedrock* below. |
 | `anthropic-oauth-dev` | OAuth (`loomcycle anthropic login`) | api.anthropic.com | **Research/dev ONLY**, opt-in via `LOOMCYCLE_ANTHROPIC_OAUTH_DEV_ENABLED=1`. Single-machine. **Never** for production, multi-tenant, multi-replica, or customer-facing. Reverse-engineered subscription billing; no SLA, ToS risk. Verify a live token server-side with `loomcycle anthropic status --probe` (**v0.23.3**, F6/#392 — plain `status` reports only local file metadata); concurrent loomcycle processes now share the token file safely via a cross-process refresh lock (**v0.23.3**, F7/#391). Setup + robustness walkthrough below. |
 
 A provider with no API key set is marked **excluded** (treated like unreachable)
@@ -36,7 +37,7 @@ providers:
     driver: vllm                # openai | anthropic | gemini | deepseek | ollama | vllm | llamacpp
     base_url: http://vllm.local:8000/v1
     api_key_env: VLLM_API_KEY   # env-var NAME; omit for a keyless endpoint
-    max_concurrent: 2           # optional cap on in-flight runs (queue, then 429)
+    max_concurrent: 2           # optional cap on in-flight MODEL CALLS (v1.113.0; = lanes.chat.max_concurrent)
     options: { header_timeout_ms: 600000, idle_timeout_ms: 600000 }
     capabilities: { max_context_tokens: 32768 }   # vLLM / llama.cpp fix the window at launch
   ollama-local:                 # override one field of a built-in
@@ -51,6 +52,128 @@ providers:
 - **An empty key replaces.** A bare `providers:` with every entry commented out
   is a YAML null and *removes* every provider an earlier layer declared. Comment
   the key out too.
+
+### Amazon Bedrock with AWS credentials (v1.119.0)
+
+An `auth:` block authenticates a provider with the process's AWS credentials
+(SigV4 signing, or a minted short-term Bedrock key) instead of an
+`api_key_env` — no secret in any config, every call attributed to the role in
+CloudTrail. Accepted on the `anthropic` and `openai` drivers only, needs an
+`https` `base_url`, exclusive with `api_key_env`.
+
+```yaml
+providers:
+  bedrock-claude:
+    driver: anthropic
+    base_url: https://bedrock-runtime.eu-central-1.amazonaws.com/anthropic
+    auth: { type: aws_sigv4, region: eu-central-1 }   # or type: aws_bedrock_token
+  bedrock-openai:
+    driver: openai
+    base_url: https://bedrock-runtime.eu-central-1.amazonaws.com/openai/v1
+    auth: { type: aws_sigv4, region: eu-central-1 }
+```
+
+- `region` is required and must match the `base_url` host. Optional:
+  `service`, `role_arn` (assume a role, e.g. cross-account), `external_id_env`,
+  `session_name` (default `loomcycle`).
+- Credentials come from the standard AWS chain: `AWS_ACCESS_KEY_ID` /
+  `AWS_SECRET_ACCESS_KEY` (+ `AWS_SESSION_TOKEN`), web identity (EKS IRSA),
+  `~/.aws` profiles (`AWS_PROFILE`, SSO), the ECS/EKS container endpoint, or the
+  EC2 instance role (IMDSv2 only). Refreshed before expiry.
+- Claude ids are inference profiles on the runtime host
+  (`eu.anthropic.claude-sonnet-5-5`, `us.…`, `global.…`) and are served only on
+  the Anthropic route. Never use `global.` for data with residency rules.
+- A tenant's own key overrides the operator's under the name
+  `AWS_BEARER_TOKEN_BEDROCK` (a CredentialDef).
+- `loomcycle doctor` checks each `auth` provider's AWS identity, and warns when
+  host `Bash` or the Bashbox host fallback is on beside one (a host command can
+  read the instance role's credentials).
+
+**Cohere Embed on Bedrock (v1.121.0).** The same credentials can serve
+`memory.embedder` with `api: bedrock` (required on an `auth:` provider; no
+`base_url` / `api_key_env` of its own; runtime host only — `bedrock-mantle` is
+refused):
+
+```yaml
+models:
+  cohere-embed: { provider: bedrock-claude, model: eu.cohere.embed-v4:0, kind: embedder }
+memory:
+  embedder: { model: cohere-embed, api: bedrock, dimensions: 1024 }
+```
+
+Cohere Embed v4 (`dimensions` `0`→1536, `256`, `512`, `1024`, `1536`) and v3
+multilingual / English (fixed 1024). Prefer a geographic profile
+(`eu.cohere.embed-v4:0`), or `cohere.embed-multilingual-v3` where text must stay
+in the calling region. Switching embedders needs `POST /v1/_memory/reembed` on a
+populated store, then `loomcycle memory-calibrate`. Full IAM policy: loomcycle
+`docs/PROVIDERS.md`.
+
+### Per-provider concurrency — call lanes (v1.113.0 / v1.114.0)
+
+`max_concurrent` counts **model calls**, not runs: a slot is taken just before
+each call and returned when it ends, so nothing is held while a run executes a
+tool, waits for a child or waits for its operator. Each kind of model call has
+its own queue, a **lane**; `max_concurrent` is shorthand for the chat lane.
+
+```yaml
+providers:
+  ollama-local:
+    max_models_in_flight: 1                    # different models computing at once; 0 = unlimited
+    models_in_flight_exempt_kinds: [embedder]  # embeddings don't wait for the chat model (v1.114.0)
+    model_switch_max_wait_ms: 30000
+    lanes:
+      chat:     { max_concurrent: 4, model_caps: { qwen3.6:latest: 1 } }   # per-model cap inside a lane (v1.114.0)
+      decision: { max_concurrent: 2 }
+      embedder: { max_concurrent: 2, background_share: 0.25 }
+```
+
+- **A run's calls always wait** — a busy provider never fails an admitted run.
+  Only requests sent outside any run (gateway, `/v1/embeddings`,
+  `/v1/_decide`) are bounded, by `concurrency.provider_queue_depth`
+  (`429 provider_concurrency_exhausted`).
+- Lane tuning: `affinity_hold_ms` (keep a slot warm for the run that just used
+  it), `quantum_calls` (bound its consecutive turns), `background_share` (a
+  guaranteed share for consolidation / reindex sweeps). Defaults are a plain
+  fair queue.
+- **A run waiting for a provider lends its run slot (v1.114.0)** to the next run
+  waiting to start, so a saturated local provider does not block runs bound for
+  an idle cloud provider; lent runs count against `max_queue_depth`.
+- Waits show on the run stream as `call_queued` / `call_admitted`; totals on
+  `GET /v1/_concurrency/stats` and the Web UI **Lanes** page (admin).
+- `decision.max_concurrent` and `memory.reranker.max_concurrent` were
+  **removed in v1.113.0** — a config that sets either fails to load; move the cap
+  to the provider's `decision` (or `chat`, for a listwise rerank) lane. With no
+  lane set, decisions and reranks are each held to 4 in flight per provider.
+- Per replica / advisory. Leave vendor-rate-limited cloud providers uncapped.
+
+**Skip a busy provider — queue-aware routing (v1.114.0).** An agent (or one
+run, via `routing` on the run request / `spawn_run` / `retune_run`) can pass
+over a candidate whose estimated wait exceeds `switch_after_ms`:
+
+```yaml
+agents:
+  triage:
+    tier: middle
+    routing: { queue_aware: true, switch_after_ms: 20000 }   # default 20000
+```
+
+At run start, and once more at a call boundary after it loses its lane slot
+(a fallback event with reason `queue_wait`). Chooses only among the definition's
+candidates; refused on an agent pinned to a provider/model.
+
+### The run queue (v1.113.0 / v1.114.0)
+
+A run that cannot start at once — over `LOOMCYCLE_MAX_CONCURRENT_RUNS_PER_USER`
+or the global `concurrency.max_concurrent_runs` — is **queued, not refused**:
+it gets its row (status `queued`), id and events first (`queued` with `reason`
+`user_cap` / `global_cap` and `position`, then `admitted` with `wait_ms`), is
+cancellable, and survives a restart. Waiting runs are served round-robin across
+(tenant, user). Bounds: `concurrency.max_queue_depth` (default 32) and
+`max_queued_runs_per_user` (16, `LOOMCYCLE_MAX_QUEUED_RUNS_PER_USER`); past them
+`429 backpressure`. `admission: "reject"` on a request (HTTP, gRPC, MCP
+`spawn_run` / `spawn_runs`) refuses instead of waiting. Since v1.114.0 session
+continuations and the LLM gateway queue too, and `concurrency.queue_timeout_ms`
+is no longer read. `get_run` reports `queue_position` / `queue_reason`.
 
 > **Provider keys are referenced by env-var name, never `${}`-interpolated.**
 > A provider key reaches its driver through loomcycle's `Env` struct — there is
@@ -185,7 +308,7 @@ whatever the provider's live catalog serves (the embedded presets do this for
 local models). A `model_pattern` alias is refused in `decision:`,
 `memory.embedder` and `memory.reranker`.
 
-### Model kinds — the `kind:` tag on an alias (v1.107.0)
+### Model kinds — the `kind:` tag on an alias (v1.107.0; more kinds v1.123.0 / v1.126.0)
 
 ```yaml
 models:
@@ -199,6 +322,8 @@ models:
 | an agent's `model:`, a tier candidate, the listwise memory reranker, `memory.unit_generator` | `chat` |
 | the `decision:` block, a memory reranker with `kind: decision` | `decision` |
 | `memory.embedder.model` | `embedder` |
+| `transcription.stt.model` (speech-to-text, v1.123.0) | `transcriber` — the tag is **required**; an untagged alias is refused |
+| `speech.voices.<language>.model` (text-to-speech, v1.126.0) | `synthesizer` — the tag is **required**; an untagged alias is refused |
 
 - **Wrong tag → config load fails.** The error names the alias, its kind and the
   place (`memory.embedder.model: models.decide is kind: decision, and a model of
@@ -210,6 +335,48 @@ models:
   plain model name (not an alias) is never checked.
 - The kind is a placement check only — never a routing input. `GET /v1/_models`
   reports it.
+- **`license: commercial | noncommercial`** on an alias (v1.126.0; anything else
+  fails load). Nothing refuses a noncommercial model; a speech voice using one
+  adds a load warning — keep CC BY-NC voices off a hosted, paid deployment.
+
+### OCR, speech-to-text and text-to-speech (v1.123.0 – v1.126.0)
+
+Configured in two top-level blocks; absent = off. Per-agent blocks may only lower
+the operator's caps.
+
+```yaml
+providers:
+  whisper-local: { driver: openai, base_url: http://speaches:8000/v1 }   # OpenAI /v1/audio/transcriptions shape
+  speech-local:  { driver: openai, base_url: http://speaches:8000/v1 }   # OpenAI /v1/audio/speech shape
+models:
+  whisper: { provider: whisper-local, model: <served model id>, kind: transcriber }
+  tts-en:  { provider: speech-local, model: <served model id>, kind: synthesizer, license: commercial }
+
+transcription:
+  ocr: { engine: vision, tier: middle, max_pages_per_run: 300 }        # File op=extract ocr: auto|always (v1.123.0)
+  stt: { engine: openai-audio, provider: whisper-local, model: whisper, language: en }   # File op=transcribe (v1.125.0)
+speech:                                                                # config only so far (v1.126.0) — nothing speaks yet
+  engine: openai-speech
+  default_language: en
+  voices: { en: { model: tts-en, voice: <engine voice id> } }
+
+agents:
+  doc-reader:
+    transcription: { ocr: auto, max_pages_per_run: 50 }   # OCR defaults to never per agent (billed per page)
+```
+
+- OCR resolves its model through `transcription.ocr.tier` (or a pinned chat
+  alias) with vision support; tenant keys and the operator-key restriction apply.
+- `ogg` / `mp3` speech output needs `speech.encode` (an ffmpeg command); the
+  `denngubsky/loomcycle-media` image carries `ffmpeg` and `poppler-utils` for
+  the STT converter and OCR rasterizer.
+- **Pricing:** speech-to-text `pricing.models."<provider>/<model>": { per_minute: 0.006 }`
+  (billed by the second); a per-character speech engine
+  `{ per_million_chars: 15 }` (v1.126.0, also used for embeddings that report no
+  tokens). A pair absent from the table is unpriced, not free. Usage rows carry
+  purpose `ocr` / `stt` / `tts` — see [token-limits.md](token-limits.md).
+- Full fields: loomcycle `docs/CONFIGURATION.md` §9h–9i; the `File` tool ops in
+  [files.md](files.md).
 
 ## Pattern 2 — multiple providers, cost-floor cascade
 
@@ -498,7 +665,7 @@ decision:
   models: [decide]           # optional; omitted = every alias tagged kind: decision, plus the default
   provider: ollama-local     # only for plain model names in the list (an alias carries its own)
   timeout_ms: 30000          # default 30000 — must cover a model reload on a shared GPU
-  max_concurrent: 4          # default 4, per provider
+  # (max_concurrent was removed in v1.113.0 — cap it with providers.<id>.lanes.decision)
 
 agents:
   triage:
@@ -538,7 +705,7 @@ memory:
     model: qwen3.6:latest        # …and model, or just a models: alias
     effort: low                  # listwise only — thinking off on a hybrid local model
     timeout_ms: 30000            # default 30000; a slower rerank keeps search's own order
-    max_concurrent: 2            # default 4
+    # (max_concurrent was removed in v1.113.0 — cap it with the provider's chat/decision lane)
     sources: [documents, facts, notes]   # default [documents]
 
 agents:
@@ -597,7 +764,8 @@ LOOMCYCLE_PRESETS=base,local loomcycle --config ~/.config/loomcycle/loomcycle.ya
 
 - **Presets** (routing only): `base` (the full provider matrix, aliases, tiers,
   user_tiers), `oauth` (puts `anthropic-oauth-dev` on top), `local` (puts
-  `ollama-local` on top). `oauth` / `local` `!prepend` onto `base`, so `base,local`
+  `ollama-local` on top), `bedrock` (v1.119.0 — declares `bedrock-claude` /
+  `bedrock-openai` for `LOOMCYCLE_BEDROCK_REGION`; changes no routing). `oauth` / `local` `!prepend` onto `base`, so `base,local`
   keeps base's cloud providers as fallback — unset the cloud keys or set
   `LOOMCYCLE_NO_DEFAULT_PROVIDERS=1` to stay local-only.
 - **Bundles** (agents + inline skills): `chat`, `document-agent`, `memory`,
@@ -640,7 +808,8 @@ LOOMCYCLE_PRESETS=base,local loomcycle --config ~/.config/loomcycle/loomcycle.ya
 | `unknown provider "X"` | `X` isn't a declared provider — check spelling against the provider table / your `providers:` map. |
 | `models.X is kind: K, and a model of kind: K2 is needed here` | The alias is tagged for another use — point the field at an alias of the right kind. |
 | `decision.default: "X" is served by provider "P", whose "D" driver serves no decision models` | Decision models need an Ollama provider. |
-| `decision: unknown key "X"` | The block takes only `default`, `models`, `provider`, `timeout_ms`, `max_concurrent`. |
+| `decision: unknown key "X"` | The block takes only `default`, `models`, `provider`, `timeout_ms`. |
+| a config setting `decision.max_concurrent` or `memory.reranker.max_concurrent` fails to load (v1.113.0) | Remove it; cap the provider's `lanes.decision` / `lanes.chat` instead (the error names the lane). |
 | `memory.reranker.kind: "X" is not one of listwise, decision` / `memory.reranker.sources: "X" is not one of documents, facts, notes, traces` | Fix the value. |
 | `context.mode "X" invalid (want append\|recap\|stateful\|auto)` | Fix the mode. |
 | `LOOMCYCLE_READ_ROOT, … retired in RFC AH Phase 3 — declare a volumes: block instead` | Remove the var(s) from env; use a `volumes:` block. See [volumes.md](volumes.md). |

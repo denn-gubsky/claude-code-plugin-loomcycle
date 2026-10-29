@@ -147,5 +147,29 @@ month to roll. See `skills/loomcycle-configure/reference/token-limits.md`.
 **Scope refusal:** `spawn_run` needs the `runs:create` scope on the plugin's
 token. A token without it does not see the tool at all.
 
+**A busy runtime queues; it does not refuse** (v1.113.0+). A run that cannot
+start at once waits in the run queue with its `run_id` already assigned. A
+blocking call just takes longer. A detached one may come back
+`status: "queued"`; it starts on its own, and `/loomcycle:cancel` reaches it
+while it waits. Only a full queue, or a request sent with
+`admission: "reject"`, is refused.
+
+**Other refusals, and what to tell the user.** Read the error's code; none of
+these is fixed by retrying the same call:
+
+| Code | Meaning |
+|---|---|
+| `acl_denied` | An access-control rule denies this agent or a setting for this caller. The error names the list and rule. `/loomcycle:access explain run agent:<name>` shows why. |
+| `acl_unavailable` | The rules could not be read. Under `enforce` that refuses rather than admits. Transient: retry later. |
+| `restricted_token` | The token is limited to certain agents (or to the run endpoints) and this is outside it. |
+| `override_not_allowed` | The token locks a per-run setting you sent (`model`, `effort`, limits, …). Drop that field. |
+| `rate_limited` | The token's start rate is spent. Wait for the time given. |
+| `retention_none_unsupported` | A no-trace agent or token cannot do what was asked (interactive, review, continue a session, …). |
+
+**Files the run produced.** A run whose tools returned files shows lines such
+as `[file: volume:inbox:… · application/pdf · …]`. Those files sit in the run's
+inbox. Point the user to `/loomcycle:files <run_id>` to look at them or keep
+them; the inbox goes when the run ends.
+
 If the agent name is missing or unknown, stop and ask the operator which
 registered agent to use rather than guessing.

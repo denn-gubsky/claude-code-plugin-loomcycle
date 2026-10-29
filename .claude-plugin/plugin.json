@@ -1,8 +1,8 @@
 {
   "name": "loomcycle",
   "displayName": "loomcycle",
-  "version": "1.10.0",
-  "description": "Drive a loomcycle agentic runtime from inside Claude Code \u2014 spawn, fan out, retune, review and cancel runs, ask a decision model, snapshot, evaluate, read and write memory and documents, mint multi-tenant operator tokens, import .claude/ repos, and configure providers, model aliases, volumes, sandboxes, credentials and token budgets, all via slash commands and skills over loomcycle's bundled MCP server.",
+  "version": "1.11.0",
+  "description": "Drive a loomcycle agentic runtime from inside Claude Code — spawn, fan out, retune, review and cancel runs, ask a decision model, snapshot, evaluate, read and write memory and documents, inspect and keep the files runs produce, see who your token is and what access-control rules allow, manage groups, rule lists and bindings, mint multi-tenant operator tokens, import .claude/ repos, and configure providers, model aliases, volumes, sandboxes, credentials, sign-in gates, access control, the File and Git tools and token budgets, all via slash commands and skills over loomcycle's bundled MCP server.",
   "author": {
     "name": "Dennis Gubsky",
     "email": "dgubsky@waverleysoftware.com",
@@ -29,13 +29,13 @@
     "auth_token": {
       "type": "string",
       "title": "loomcycle bearer token",
-      "description": "Bearer for loomcycle's /v1/* endpoints, sent by the thin client to the upstream runtime (as LOOMCYCLE_MCP_UPSTREAM_TOKEN). Its principal governs what the plugin can do: an admin token \u2192 full authority; a substrate:tenant or config-declared-principal token \u2192 confined to that tenant (admin-only commands like operator-token / snapshot are unavailable); a narrower token needs runs:create to start runs and runs:read to read them. Use the SAME declared-principal token for the Web UI login and this field so the plugin and the UI act as one identity. Stored in your OS keychain, never in the repo.",
+      "description": "Bearer for loomcycle's /v1/* endpoints, sent by the thin client to the upstream runtime (as LOOMCYCLE_MCP_UPSTREAM_TOKEN). Its principal governs what the plugin can do: an admin token → full authority; a substrate:tenant or config-declared-principal token → confined to that tenant (admin-only commands like operator-token / snapshot are unavailable); a narrower token needs runs:create to start runs and runs:read to read them; access-control rules can narrow any of these. With loomcycle v1.126.0+ you can instead run `loomcycle login --url <base_url>` in a terminal, which stores a per-user token in the OS keychain that the thin client uses when this field is empty; check with /loomcycle:whoami. Stored in your OS keychain, never in the repo.",
       "sensitive": true
     },
     "base_url": {
       "type": "string",
       "title": "loomcycle base URL (upstream runtime)",
-      "description": "Base URL of the running loomcycle runtime the plugin proxies to (e.g. http://127.0.0.1:8787). REQUIRED \u2014 the plugin is a thin client and boots no runtime of its own; a loomcycle instance must be reachable here.",
+      "description": "Base URL of the running loomcycle runtime the plugin proxies to (e.g. http://127.0.0.1:8787). REQUIRED — the plugin is a thin client and boots no runtime of its own; a loomcycle instance must be reachable here.",
       "default": "http://127.0.0.1:8787"
     }
   }
