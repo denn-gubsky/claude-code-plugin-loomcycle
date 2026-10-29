@@ -39,8 +39,10 @@ the v1.126.0 source. Version bump `1.10.0 → 1.11.0` (`plugin.json` +
 
 ### Changed
 
-- **`reference/mcp-tools.md`**: `identity` replaces `directory`, and users are
-  no longer described as derived from run activity. New clusters: access
+- **`reference/mcp-tools.md`**: `identity` replaces `directory` (first noted
+  under Unreleased in #31, folded in here), and users are no longer described
+  as derived from run activity. `op=inspect` became `op=held`, which needs a
+  grant to manage principals, so a member token can no longer call it. New clusters: access
   control, files a run produced, cryptography. Four ways to make a run go away
   (`cancel_run`, `configured_run op=delete`, `delete_run_tree`, `erasure`). Team
   decision states and a team's own channels. The run queue. The reach section
