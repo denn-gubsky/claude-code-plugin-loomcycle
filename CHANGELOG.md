@@ -4,6 +4,20 @@ All notable changes to this project are documented here. The format follows
 [Keep a Changelog](https://keepachangelog.com/) and the project adheres to
 [Semantic Versioning](https://semver.org/).
 
+## [Unreleased]
+
+### Changed
+
+- **`directory` is now `identity`.** The runtime replaced the `directory` MCP
+  tool with `identity`, the tenant directory an agent gets in a run as the
+  `Identity` tool: public profiles, status and groups, groups and their
+  members, `can` / `explain` for another person, and `held` (what is kept
+  for a person). `directory op=users` is `identity op=users`
+  (`active_only: true` for the run-activity view) and `op=inspect` is
+  `op=held`, which now needs a grant to manage principals — a member token
+  can no longer call it. The tool map says so; reload the plugin after
+  upgrading the runtime so the new schema is fetched.
+
 ## [1.10.0] — 2026-10-08
 
 **Brought up to loomcycle v1.107.0.** The plugin was last grounded around
