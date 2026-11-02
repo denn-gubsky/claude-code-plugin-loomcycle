@@ -151,6 +151,15 @@ transactions inside the statement, and multiple `;`-separated statements are all
 refused. `sql_begin`/`commit`/`rollback` nest via savepoints, and need an active
 run — called from here `sql_begin` is refused.
 
+**Document tables are off limits** (v1.128.0+). The scope's database also holds
+the Document tool's tables (`documents`, `chunks`, `chunk_tags`, `chunk_edges`,
+…), and any statement that names one is refused with
+`document_tables_reserved`. Before this, a SQL write could accept an agent's
+own proposed relation or read past the Document access rules. Use the
+`document` tool instead: `query_chunks` (its own `sql` escape hatch reads the
+chunk tables), or the Document ops. A table of your own that carries one of
+those names is refused too: rename it.
+
 On postgres, `{"$embed": "text"}` in `args` is replaced server-side by that text's
 embedding — reference it with a `::vector` cast. That keeps raw vectors out of the
 model's context.
