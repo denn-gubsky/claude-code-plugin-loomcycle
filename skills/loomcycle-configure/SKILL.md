@@ -1,6 +1,6 @@
 ---
 name: loomcycle-configure
-description: Configure a loomcycle runtime — providers, model tiers and aliases, model kinds (chat / decision / embedder) and decision models, user tiers, fallbacks, per-agent sampling, context retention and compaction, agent hooks and hook definitions, interactive runs and review holds, environment variables, deployment profiles (brew/in-system, containerized, true sandbox, server, multi-tenant, cloud), filesystem Volumes, the Bashbox in-process sandbox, the Path VFS, chunked-graph Documents, encrypted per-tenant credentials (CredentialDef / $cred: / provider-key override), access control (rule lists, groups, bindings), users and sign-in gates, the run inbox and File tool, the Git tool, per-scope token budgets and usage/cost attribution, inbound webhooks, and third-party MCP servers. Use when the user wants to set up or tune loomcycle.yaml or its env, pick a deployment posture, wire provider routing/cost-cascades, gate plans, tune decoding (temperature/top_p), context retention or compaction, add a decision model, gate an agent's tool calls with hooks, make runs interactive or hold their answers for review, lock down tool/sandbox/auth, enable or choose between Bash and the Bashbox sandbox (incl. its host-command fallback), name resources with Path, author chunked-graph Documents (and the SQL Memory they require), store tenant/user API keys or bring-your-own provider keys, set token budgets, receive webhooks, connect external MCP tools, write access-control rules (ACL lists, groups, bindings), set up sign-in gates (password, OIDC, OAuth, header/SSO proxy, AWS IAM, external/bridge, device login) and users, give agents the Identity tool, handle files tools return (run inbox, File tool, extraction, OCR, transcription), or give agents the Git tool.
+description: Configure a loomcycle runtime — providers, model tiers and aliases, model kinds (chat / decision / embedder) and decision models, user tiers, fallbacks, per-agent sampling, context retention and compaction, agent hooks and hook definitions, interactive runs and review holds, environment variables, deployment profiles (brew/in-system, containerized, true sandbox, server, multi-tenant, cloud), filesystem Volumes, the Bashbox in-process sandbox, the Path VFS, chunked-graph Documents, encrypted per-tenant credentials (CredentialDef / $cred: / provider-key override), access control (rule lists, groups, bindings), users and sign-in gates, the run inbox and File tool, the Git tool, per-scope token budgets and usage/cost attribution, inbound webhooks, and third-party MCP servers. Use when the user wants to set up or tune loomcycle.yaml or its env, pick a deployment posture, wire provider routing/cost-cascades, gate plans, tune decoding (temperature/top_p), context retention or compaction, add a decision model, gate an agent's tool calls with hooks, make runs interactive or hold their answers for review, lock down tool/sandbox/auth, enable or choose between Bash and the Bashbox sandbox (incl. its host-command fallback), name resources with Path, author chunked-graph Documents (and the SQL Memory they require), copy documents between scopes, build a knowledge base (statements, the sectioned ontology, citation grammars, classify, editions, review policies, the judge, the links agent), store tenant/user API keys or bring-your-own provider keys, set token budgets, receive webhooks, connect external MCP tools, write access-control rules (ACL lists, groups, bindings), set up sign-in gates (password, OIDC, OAuth, header/SSO proxy, AWS IAM, external/bridge, device login) and users, give agents the Identity tool, handle files tools return (run inbox, File tool, extraction, OCR, transcription), or give agents the Git tool.
 allowed-tools: Read Write Edit Bash(loomcycle validate*) Bash(loomcycle doctor*) Bash(loomcycle init*)
 ---
 
@@ -238,8 +238,25 @@ optimistic `revision` concurrency, atomic + orphan-free deletes. **Two
 gates: `tools:[Document]` AND `LOOMCYCLE_SQLMEM_ENABLED=1`** (the structure tables live in SQL
 Memory — the #1 "Document refused" cause). Scope `agent`/`user`/**`tenant`** (v1.41.0+ — tenant is
 shared across the tenant and needs `tenant` in **both** `memory_scopes` and `sql_scopes`, since a
-document spans both planes). **Also a direct MCP meta-tool** — `document`.
+document spans both planes). **Also a direct MCP meta-tool** — `document`. Since v1.135.0,
+`copy_documents` copies up to 500 documents between scopes with their relations (dry run by
+default; there is no move yet), and `graph_snapshot` exports a whole scope as paged columns for the
+Web UI's 3D universe view (`memory.projection` adds a map by meaning). Memory SQL can no longer
+touch the Document tables (`document_tables_reserved`, v1.128.0).
 **Full reference:** [reference/document.md](reference/document.md).
+
+## Knowledge base — statements, the sectioned ontology, review — v1.128.0+
+
+The Document tool doubles as a knowledge base. A **statement** is a relation between two chunks
+with a kind, a status (`asserted` / `proposed` / `rejected`), a method and **verbatim evidence**.
+The tenant **ontology** is a sectioned document (`@section classes|relations|schemes|instances|review`)
+that declares document classes with identity keys and citation grammars, relation kinds, concept
+schemes, instances and a **review policy**. `classify` says what a document is; `import_md`
+`reimport` reconciles a new edition onto the work it amends. Proposals are ruled one at a time by an
+operator, in bulk over MCP `review` (members need the access-control `review` grant), by the
+policy, or by the `kb/judge` agent with a sampled human audit. Subjects are merged and bound to users
+over MCP `ontology`. `LOOMCYCLE_PRESETS=base,knowledge-base` adds the `kb/linker` links agent.
+**Full reference:** [reference/knowledge-base.md](reference/knowledge-base.md).
 
 ## Entity memory — bi-temporal facts + the tenant ontology — v1.42.0+
 
@@ -414,6 +431,11 @@ through the Crypto tool. No rebase, cherry-pick, stash or non-fast-forward merge
   the dirent model, the six ops, scopes + grammar, how resources opt into a name,
   the direct `path` meta-tool, and v1 caveats. Read this for any
   resource-naming / VFS question.
+- **[reference/knowledge-base.md](reference/knowledge-base.md)** — statements and evidence,
+  the sectioned ontology (classes, grammars, relation kinds, schemes, instances, review policy),
+  editions, `classify`, bulk review and the judge, subject merge and binding, the `knowledge-base`
+  bundle (`kb/linker`), and the Memory SQL / Postgres document-plane upgrade notes. Read this for any
+  knowledge-base, relation, ontology, citation or review question.
 - **[reference/document.md](reference/document.md)** — Document primitive (RFC AK,
   v1.4.0+): chunked-graph documents, the content/structure split, the op catalogue, the
   **`LOOMCYCLE_SQLMEM_ENABLED` prerequisite**, optimistic concurrency, atomic

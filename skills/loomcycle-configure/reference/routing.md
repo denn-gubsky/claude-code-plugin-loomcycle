@@ -3,7 +3,7 @@
 This is the **`loomcycle.yaml` model-routing axis**. Authoritative source:
 loomcycle `docs/CONFIGURATION.md` + `docs/PROVIDERS.md` (+ `docs/DECISION-MODELS.md`
 for decision models). Field names below match loomcycle's config loader at
-**v1.126.0** — do not invent fields. Check any config you write with
+**v1.135.0** — do not invent fields. Check any config you write with
 `loomcycle validate <file>` (it prints agent-gate and model-kind advisories too).
 
 The agent tool-allowlist key is **`tools:`**. The old `allowed_tools:` key is
@@ -319,8 +319,8 @@ models:
 
 | Where the alias is written | Kind it must have |
 |---|---|
-| an agent's `model:`, a tier candidate, the listwise memory reranker, `memory.unit_generator` | `chat` |
-| the `decision:` block, a memory reranker with `kind: decision` | `decision` |
+| an agent's `model:`, a tier candidate, the listwise memory reranker, `memory.unit_generator`, `memory.classifier.chat` | `chat` |
+| the `decision:` block, a memory reranker with `kind: decision`, `memory.classifier.decision` | `decision` |
 | `memory.embedder.model` | `embedder` |
 | `transcription.stt.model` (speech-to-text, v1.123.0) | `transcriber` — the tag is **required**; an untagged alias is refused |
 | `speech.voices.<language>.model` (text-to-speech, v1.126.0) | `synthesizer` — the tag is **required**; an untagged alias is refused |
@@ -729,6 +729,52 @@ agents:
 - `base_url` / `api_key_env` override the provider's, as for `memory.embedder`.
   A change to the block needs a restart.
 
+## Document classifier — `memory.classifier` (v1.128.0)
+
+What `Document op=classify` asks **only** when its rules and the neighbourhood
+vote leave a document's class open (or the class is settled but no concepts
+are). Shaped like `memory.reranker`; no default model.
+
+```yaml
+memory:
+  classifier:
+    decision: { provider: ollama-local, model: nimble }                    # asked first
+    chat:     { provider: ollama-local, model: local-medium, effort: low } # fallback
+    min_probability: 0.6   # the decision model's top class must reach this ...
+    min_margin: 0.2        # ... and lead the runner-up by this, or chat is asked
+```
+
+- **`decision`** — one typed choice over the ontology's classes and a yes/no
+  per concept; needs an Ollama provider (the decision driver). `effort` /
+  `context_tokens` do not apply.
+- **`chat`** — used when there is no decision model or it is unsure (below
+  `min_probability`, or a lead under `min_margin`). Takes `effort`,
+  `context_tokens`, `timeout_ms` like a listwise reranker; its reply must name
+  a class and concepts from the lists offered and **quote the document
+  verbatim**, else the verdict is dropped. Reply budget 1024 tokens (v1.128.1).
+- Either alone is valid; with neither, classify asks no model and reports the
+  document `unclassified`. Each model takes its `base_url` / `api_key_env`
+  (falling back to `LOOMCYCLE_CLASSIFIER_API_KEY` for its own endpoint) and
+  `timeout_ms` (default 30000).
+- The thresholds (defaults 0.6 / 0.2) are **provisional**.
+- Calls take the provider's decision / chat lane and are charged to the
+  classifying run under usage purpose **`classify`** (background) — see
+  [token-limits.md](token-limits.md). A model's answer is always a proposal;
+  see [knowledge-base.md](knowledge-base.md).
+
+## Other `memory.*` blocks for Documents
+
+- **`memory.fulltext`** (v1.128.0) — the Postgres full-text leg's text search
+  configuration (`config: english` default, e.g. `russian` / `simple`) and
+  optional `unaccent`, so inflected forms of a term match. Server-wide; a change
+  rebuilds the column at the next boot (or `loomcycle migrate up --config`), as
+  the role that owns `memory_embeddings`. See [document.md](document.md).
+- **`memory.projection`** (v1.135.0) — places each document chunk on its scope's
+  3D map by meaning (`enabled`, `interval`, `refit_after`, `refit_min_new`,
+  `sample_max`; off by default; `LOOMCYCLE_DOCUMENT_PROJECTION_INTERVAL`
+  overrides `interval` and turns it on). Needs Postgres + pgvector and
+  `memory.embedder`; makes no model call. See [document.md](document.md).
+
 ## `timeout_scaling:` — measured model speed (v1.101.2)
 
 loomcycle times every model call and keeps, per (provider, model), a slowdown
@@ -770,7 +816,10 @@ LOOMCYCLE_PRESETS=base,local loomcycle --config ~/.config/loomcycle/loomcycle.ya
   `LOOMCYCLE_NO_DEFAULT_PROVIDERS=1` to stay local-only.
 - **Bundles** (agents + inline skills): `chat`, `document-agent`, `memory`,
   `system-channels`, `sandbox`, `dev-exec`, `agent-teams`, `team-examples`,
-  `doc-colorizer`. List them with `loomcycle presets`; print one with
+  `doc-colorizer`, `knowledge-base` (v1.128.0 — the `kb/linker` links agent and
+  its verdict / judge models; see [knowledge-base.md](knowledge-base.md)). The
+  `loomboard` preset (v1.127.0) declares an app sign-in client, not routing
+  (see [identity.md](identity.md)). List them with `loomcycle presets`; print one with
   `loomcycle presets show <name>`.
 - **Precedence** (base → top, last wins): `LOOMCYCLE_PRESETS` (in order) →
   `LOOMCYCLE_CONFIG_DIR/*.yaml` (lexical) → `LOOMCYCLE_CONFIG_FILES`

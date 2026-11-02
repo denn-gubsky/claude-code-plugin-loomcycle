@@ -1,7 +1,7 @@
 # Environment variable catalogue
 
 The **posture** axis. Authoritative source: loomcycle `.env.insecure.example` +
-`.env.local.example` + `internal/config`, checked against **v1.126.0**. Where the
+`.env.local.example` + `internal/config`, checked against **v1.135.0**. Where the
 template and the code disagree on a default, the default below is the code's. Set
 these in the operator's environment (the two env files below, container `-e`
 flags, or a systemd unit) — **never have this plugin write the *secret* env file;
@@ -39,7 +39,7 @@ only and live in the operator's secret store / keychain, never in a repo file.
 | `LOOMCYCLE_AUTH_MODE` | `token` | **(v1.123.0)** Fleet default for the yaml `auth.mode`: `token` (paste-a-token Web UI sign-in) or `strict` (a person signs in only through a gate in `auth.gates`). A config may raise it, never lower it. See [identity.md](identity.md). |
 | `LOOMCYCLE_UI_INSECURE_COOKIES` | off | **(v1.123.0)** `1` lets **strict** mode start Web UI sessions over plain HTTP (a cookie without `Secure`) — e.g. on a tailnet. Behind a TLS terminator set an `https://` `LOOMCYCLE_PUBLIC_URL` instead. Warned at boot. |
 | `LOOMCYCLE_GRPC_ADDR` | (unset) | gRPC listen addr (optional second transport). |
-| `LOOMCYCLE_PUBLIC_URL` | (unset) | The instance's externally reachable URL, reported to agents in `Context op=self` (`server.url`). Non-secret. **(v1.123.0)** An `https://` value with a matching `Host` makes the Web UI session cookie `__Host-lc_session` behind a TLS terminator. **(v1.126.0)** Required by `external` and `device` sign-in gates (assertions are addressed to it), and the OAuth authorization-server metadata answers `404` until it is set. |
+| `LOOMCYCLE_PUBLIC_URL` | (unset) | The instance's externally reachable URL, reported to agents in `Context op=self` (`server.url`). Non-secret. **(v1.123.0)** An `https://` value with a matching `Host` makes the Web UI session cookie `__Host-lc_session` behind a TLS terminator. **(v1.126.0)** Required by `external` and `device` sign-in gates (assertions are addressed to it), and the OAuth authorization-server metadata answers `404` until it is set. **(v1.127.0)** The passkey relying party: its host is the RP ID (`https://` with a domain, or `http://localhost`); a `kind: passkey` gate fails to load without it, and changing the host orphans registered passkeys. See [identity.md](identity.md). |
 | `LOOMCYCLE_PUBLIC_CONFIG` | off | `1` lets `GET /v1/config` be read with **no bearer**, returning a narrowed public view (version, features, live providers/models). An invalid bearer still `401`s. |
 | `LOOMCYCLE_MAX_REQUEST_BYTES` | 16777216 (16 MiB) | Run-ingest request body cap; over it → `413`. |
 | `LOOMCYCLE_SSE_KEEPALIVE_MS` | 20000 | SSE comment-ping cadence (clamped 1 s – 5 min; `0` or negative disables). |
@@ -50,7 +50,7 @@ only and live in the operator's secret store / keychain, never in a repo file.
 
 | Var | Default | Purpose |
 |---|---|---|
-| `LOOMCYCLE_PRESETS` | (unset) | Comma-separated, ordered embedded presets/bundles layered as the **base** of the config stack (`base`, `oauth`, `local`, `bedrock` (v1.119.0); bundles `chat`, `document-agent`, `memory`, `system-channels`, `sandbox`, `dev-exec`, `agent-teams`, `team-examples`, `doc-colorizer`). Opt-in; an unknown name is fatal. `--preset` (repeatable) overrides it. `loomcycle presets` lists them. |
+| `LOOMCYCLE_PRESETS` | (unset) | Comma-separated, ordered embedded presets/bundles layered as the **base** of the config stack (`base`, `oauth`, `local`, `bedrock` (v1.119.0); bundles `chat`, `document-agent`, `memory`, `system-channels`, `sandbox`, `dev-exec`, `agent-teams`, `team-examples`, `doc-colorizer`, `knowledge-base` (v1.128.0); `loomboard` app sign-in client (v1.127.0)). Opt-in; an unknown name is fatal. `--preset` (repeatable) overrides it. `loomcycle presets` lists them. |
 | `LOOMCYCLE_CONFIG_DIR` | (unset) | A directory whose `*.yaml`/`*.yml` layer in lexical filename order, above the presets. Set-but-missing is fatal. |
 | `LOOMCYCLE_CONFIG_FILES` | (unset) | `:`-separated config files layered left→right, above `CONFIG_DIR` and below explicit `--config` flags. |
 | `LOOMCYCLE_CONFIG_STRICT` | off | `1` makes any cross-layer conflict a **fatal** load error (otherwise each override is logged at startup). Recommended in production. |
@@ -182,9 +182,12 @@ root.
 | `LOOMCYCLE_MAX_CONSOLIDATION_CONCURRENCY` | 4 | Parallel consolidation children on a non-local model (a local model runtime is always serial). Since v1.101.0 it applies to code-js consolidators too. |
 | `LOOMCYCLE_RERANKER_API_KEY` | (unset) | **Secret** — the key a `memory.reranker` answers to when its block points it at its own endpoint (`base_url`) without naming an `api_key_env`. See [routing.md](routing.md). |
 | `LOOMCYCLE_UNIT_GENERATOR_API_KEY` | (unset) | **Secret** — the `memory.unit_generator` counterpart. |
+| `LOOMCYCLE_CLASSIFIER_API_KEY` | (unset) | **Secret (v1.128.0)** — the `memory.classifier` counterpart: the key its decision or chat model answers to when pointed at its own `base_url` without an `api_key_env`. See [routing.md](routing.md). |
 | `LOOMCYCLE_SQLMEM_ENABLED` | off | **(v1.2.0+, RFC AA)** `1` enables **SQL Memory** — a per-scope SQL database facet of the `Memory` tool (`sql_query`/`sql_exec`, gated per-agent by `sql_scopes`). **Also the prerequisite for the `Document` primitive** (RFC AK) — chunk structure lives in SQL Memory, so `Document` refuses without this flag. See [document.md](document.md). |
 | `LOOMCYCLE_DOCUMENT_SEARCH_FILTER_MAX_IDS` | 50000 | **(v1.123.0)** `Document op=search` / `op=related` filters (`under_path`, `type`, `status`, `tag`, `as_of`, …) resolve to a chunk-id list sent into every search leg; a filter needing more is refused (`filter_too_wide`) rather than post-filtered. |
-| `LOOMCYCLE_SQLMEM_PG_DSN` | (unset) | **Secret** — Postgres tier for SQL Memory. Its role needs `CREATEROLE` (per-scope login-role isolation). `.env.local` only. |
+| `LOOMCYCLE_DOCUMENT_EVIDENCE_MAX_PER_EDGE` | 32 | **(v1.128.0)** Most verbatim evidence quotes one statement (a relation between chunks) may carry. See [knowledge-base.md](knowledge-base.md). |
+| `LOOMCYCLE_DOCUMENT_PROJECTION_INTERVAL` | (unset) | **(v1.135.0)** A Go duration (e.g. `1h`) overriding `memory.projection.interval`, the background sweeper that places document chunks on their scope's 3D map; a positive value also **enables** the projection, so the env alone turns it on. Needs Postgres + pgvector and `memory.embedder`. See [document.md](document.md). |
+| `LOOMCYCLE_SQLMEM_PG_DSN` | (unset) | **Secret** — Postgres tier for SQL Memory. Its role needs `CREATEROLE` (per-scope login-role isolation; since v1.128.0 a scope holding documents gets a second `sqlmem_dr_…` login role — `pg_hba` must admit it, see [profiles.md](profiles.md)). `.env.local` only. |
 
 Other `LOOMCYCLE_SQLMEM_*` guardrails (`_ROOT`, `_QUOTA_BYTES`, `_MAX_ROWS`
 default 10000, `_STATEMENT_TIMEOUT_MS` default 30000, `_TXN_TIMEOUT_MS` default

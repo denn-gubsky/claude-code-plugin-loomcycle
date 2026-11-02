@@ -1,4 +1,4 @@
-# Identity and sign-in reference (v1.123.0+; checked against v1.126.0)
+# Identity and sign-in reference (v1.123.0+; checked against v1.135.0)
 
 Two questions, one page:
 
@@ -9,12 +9,19 @@ Two questions, one page:
    approval queue, Web UI sessions and `auth.mode` (v1.123.0), and the sign-in
    *gates*: password, OIDC, OAuth (v1.123.0); external, header, AWS IAM and
    device, `loomcycle login`, and app sign-in through `auth.clients` /
-   `ClientDef` (v1.126.0).
+   `ClientDef` (v1.126.0); passkeys, SCIM provisioning, gate-only user tokens
+   and the `loomboard` preset (v1.127.0).
 
 Users are **stored records** now. Each has a `status` — `active`, `disabled` or
 `pending` — an `access_mode` (`isolated`, `tenant`, …), groups, and the sign-in
 identities linked to it. A `pending` user has signed in but waits for an
 operator's approval and can do nothing else.
+
+A user id (subject) is letters, digits, `_`, `-` and, since v1.131.0, `:` `.`
+`@` `|`, up to 320 characters — so a gate user such as `cloud:<id>`,
+`pocketid:<uuid>` or `auth0|…` can list its own runs and inbox and start runs
+naming itself. `/` stays refused in a path; operator token names still refuse
+`:`.
 
 ---
 
@@ -174,7 +181,11 @@ auth:
   gate is listed; the old bearer cookie, login handoff and WebSocket
   subprotocol bearer are off; sessions need HTTPS unless
   `LOOMCYCLE_UI_INSECURE_COOKIES=1`. Strict with no interactive gate fails the
-  load; a reload cannot lower the mode (restart). API bearers are unaffected.
+  load (a `kind: passkey` gate does not count); a reload cannot lower the mode
+  (restart). API bearers are unaffected.
+- Since v1.127.0, in strict mode a **hand-minted per-user token is never a Web
+  UI sign-in** (the person signs in through a gate); it still works as an API
+  bearer unless `auth.strict.user_tokens: gate_only` is set (below).
 - **`LOOMCYCLE_PUBLIC_URL`** is what makes a request behind a TLS terminator
   count as HTTPS (no forwarded header is trusted), and it is **required** by
   the password, OIDC, OAuth, external and device gates and by app sign-in.
@@ -183,12 +194,18 @@ auth:
 - **Approval queue:** `new_user.status: pending` (recommended for strict)
   lets a newcomer reach only an "awaiting approval" page until an operator
   approves them in the Users console (`POST /v1/_users/{subject}/approve`).
+- **An operator's disable** (`PATCH /v1/_users/{subject}` with
+  `status: disabled`) ends the user's Web UI sessions, retires its tokens and
+  takes the user from SCIM (v1.127.0); a re-enable that raced a new disable
+  answers 409.
 
 ### Gate kinds
 
 A gate name is lowercase letters, digits, `-`, `_` (≤32). Client and gate
 secrets are always an **env var name** (`*_env`); a literal or a `$cred:`
-reference is refused. `identity_map` decides the tenant and provisioning
+reference is refused. Since v1.130.0 an **unknown key** under
+`auth.gates.<name>` or its `new_user` block **fails the config load** and names
+the keys the block takes — run `loomcycle validate` before upgrading. `identity_map` decides the tenant and provisioning
 (`provision: never | known` (default) `| auto`, auto at the
 `auth.lifecycle.new_user` floor); the gate's assertion never picks the tenant.
 Only a gate with `trusted: true` may grant more than the floor or sync groups,
@@ -197,13 +214,15 @@ and only into its own `<gate>:` groups.
 | kind | Use when | Key fields |
 |---|---|---|
 | `token` | people paste a loomcycle token (at most one) | `label` |
-| `password` | loomcycle keeps logins and passwords (own sign-up, invites) | `require_mfa`, `invites`, `resets`, `new_user`, `trusted`; needs `LOOMCYCLE_SECRET_KEY` + `LOOMCYCLE_PUBLIC_URL`. Managed under `/v1/_authgate/{gate}/…`; no route ever takes a password |
-| `oidc` | Google Workspace, Entra, Okta, Keycloak, Cognito, IAM Identity Center, Auth0, any OIDC IdP | `preset`, `client_id`, `client_secret_env`, `issuer` (most presets), `allowed_domains` (required for `google`), `identity_map`. Redirect URI `<PUBLIC_URL>/v1/_auth/complete/<gate>` |
+| `password` | loomcycle keeps logins and passwords (own sign-up, invites) | `require_mfa` (a passkey meets it), `invites`, `resets`, `new_user` (`status: active` default, or `pending` so website sign-ups wait for approval — v1.130.0), `trusted`; needs `LOOMCYCLE_SECRET_KEY` + `LOOMCYCLE_PUBLIC_URL`. Managed under `/v1/_authgate/{gate}/…`; no route ever takes a password |
+| `oidc` | Google Workspace, Entra, Okta, Keycloak, Cognito, IAM Identity Center, Auth0, any OIDC IdP | `preset`, `client_id`, `client_secret_env`, `issuer` (most presets), `identity_map`. `preset: google` needs `allowed_domains` (the `hd` claim) **or** `allow_any_account: true` (v1.132.0, below). Redirect URI `<PUBLIC_URL>/v1/_auth/complete/<gate>` |
 | `oauth` | GitHub, GitLab, Gitea, a generic OAuth 2.0 provider (no ID token) | `preset`, `client_id`, `client_secret_env`, `base_url`, `allowed_orgs` + `require_org` (or `allow_any_account`) for public github.com / gitlab.com |
 | `external` | a program — chat bridge, website, broker — signs who it talks to with its own key | `public_key` (Ed25519 / P-256 JWK) or `hmac_secret_env`, `issued_token`, `identity_map`, optional `callback_url` for browser login |
 | `header` | a proxy already signed the person in | `preset`: `cloudflare-access` (`team_domain`, `audience`), `aws-alb` (`alb_arn`), `forward-auth-hmac` (`secret_env`); `trusted_proxy_cidrs` always required |
 | `awsiam` | AWS workloads get API tokens (never on the login page) | `allowed_arns` (literal 12-digit account), `server_id`, `sts_regions`, `identity_map` |
 | `device` | a terminal or headless client signs in by device code | needs `LOOMCYCLE_PUBLIC_URL`; approved on the `/ui/device` page |
+| `passkey` | password-less sign-in with a passkey (v1.127.0; at most one) | `label` only; needs a usable `LOOMCYCLE_PUBLIC_URL` |
+| `scim` | an identity provider pushes joiners, movers and leavers over SCIM 2.0 (v1.127.0; at most one; never a sign-in) | `trusted`, `identity_map`, `max_sync_removals`, `max_sync_creates`, `on_removed` |
 
 Subjects are `<gate>:<id>` — the provider's `sub` or numeric user id, never an
 e-mail or a renameable login. Password, header and AWS IAM gates are built at
@@ -229,6 +248,105 @@ auth:
       issued_token: { ttl: 12h, agents: [chat], max_active: 2 }
       identity_map: { tenant: acme, provision: auto, legacy_subject_prefix: telegram- }
 ```
+
+**Personal Google accounts (v1.132.0).** A `@gmail.com` account has no `hd`
+claim, so `allowed_domains` never admits it. `allow_any_account: true` on
+`preset: google` (never together with `allowed_domains`) admits every Google
+account with a verified e-mail. Because anyone can then reach the gate, it
+loads only when a stranger's first sign-in can at most wait for approval:
+`provision: known`, or `provision: auto` with new users `pending`. Google
+through any **other** OIDC preset (an `issuer` or `discovery_url` on
+`accounts.google.com`) now fails the load — use `preset: google`.
+
+### Passkeys (v1.127.0)
+
+```yaml
+auth:
+  gates:
+    local: { kind: password }                                   # passkeys are a second factor here
+    keys:  { kind: passkey, label: "Sign in with a passkey" }   # password-less sign-in
+```
+
+- **The relying party is `LOOMCYCLE_PUBLIC_URL`** — `https://` with a domain
+  (`http://localhost` for development). A `kind: passkey` gate without one
+  fails the load; a password gate without one simply offers no passkeys.
+  Changing the public URL's host orphans every registered passkey.
+- **Second factor at a password gate:** an account with a passkey answers a
+  right password with `401 second_factor_required` and a passkey offer;
+  `require_mfa` and password / authenticator step-ups accept a passkey.
+- **Password-less (`kind: passkey`):** `/v1/_auth/passkey/{gate}/begin`, then
+  `/v1/_auth/complete/{gate}`; the session is bound to the key (removing it
+  ends the session). It does not count as a strict deployment's interactive
+  gate — a passkey is registered from another gate's session.
+- **Self-service** under `/v1/_auth/passkeys` (list, `register/begin`,
+  `register/finish`, rename, remove) and the Web UI account page; at most ten
+  per account. Adding or removing one needs a step-up in the same request
+  (password plus second factor, a passkey, or a fresh identity-provider sign-in
+  within `reauth_window`); never from a pasted token's session. The last usable
+  way in cannot be removed.
+- **No downgrade:** an account with any stored passkey (a flagged one
+  included) never signs in on its password alone, even if passkeys are later
+  unusable — `403 second_factor_unavailable` when it has no authenticator app.
+  Reset and invite links for it require its passkey or authenticator. A
+  password account with flagged keys and no authenticator cannot remove its
+  last usable key (`409 flagged_passkeys_remain`).
+- A signature counter that does not advance refuses the sign-in and flags the
+  key for good. Only the key's id and public key are stored; passkeys are not
+  snapshotted. `DELETE /v1/_authgate/{gate}/credentials/{subject}` removes them
+  with the password and authenticator (a lost device).
+
+### SCIM 2.0 provisioning — `kind: scim` (v1.127.0)
+
+```yaml
+auth:
+  gates:
+    okta:
+      kind: scim
+      trusted: true                     # may assert accessMode and sync groups
+      identity_map:
+        tenant: acme
+        groups: { provision: true, map: { sales-emea: sales } }
+        new_user: { access_mode: tenant, groups: [staff] }
+        authoritative_for_users: true   # DELETE / active:false remove users
+      max_sync_removals: "10%"          # per rolling 24 h (default 10%, at least 5)
+      max_sync_creates: 1000            # per rolling 24 h (default 1000; 429 beyond)
+```
+
+- **The credential:** mint a token holding `scim:provision` **alone**
+  (`OperatorTokenDef create … scopes: [scim:provision]`) and give the provider
+  `<LOOMCYCLE_PUBLIC_URL>/scim/v2` with it as bearer. It reaches `/scim/v2/*`
+  only, in its own tenant; gRPC refuses it. Its `builtin:scim-provisioner`
+  baseline allows the routes' `principal:scim:users` / `principal:scim:groups`
+  checks (see [access-control.md](access-control.md)).
+- **Users** are provisioned as `<gate>:<SCIM id>` — never linked by
+  `userName`, e-mail or `externalId` — at the `new_user` floor. A pending user
+  reads `active: false` and stays pending (approval is an operator's).
+- **Leavers:** `DELETE` / `active: false` (needs `authoritative_for_users`)
+  runs the gate's removal policy, held to `max_sync_removals`. SCIM never
+  re-enables a user an operator disabled; a re-enable while a removal stage
+  runs, or after erase, is `409 removal_in_progress`.
+- **Groups** (trusted gate with `identity_map.groups`) sync into
+  `<gate>:<slug>`; deleting a SCIM group keeps the loomcycle group.
+- Supported: Users / Groups CRUD and PATCH, `eq` filters, paging ≤100,
+  ServiceProviderConfig, ResourceTypes, Schemas. No bulk, sort, ETags or
+  password changes. Not nameable in `auth.tenant_policies`.
+
+### Gate-only personal tokens — `auth.strict.user_tokens` (v1.127.0)
+
+```yaml
+auth:
+  mode: strict
+  strict: { user_tokens: gate_only }   # any (default) | gate_only
+```
+
+`gate_only` refuses a hand-minted per-user token on every transport (HTTP,
+gRPC, A2A, MCP), and `POST /v1/_users/{subject}/tokens` answers
+`403 user_tokens_gate_only`: a person's API token comes only from a gate
+(`loomcycle login`, app sign-in, an external or AWS IAM gate). Operator and
+tenant tokens, service tokens, `auth:manage`, `scim:provision`, declared
+principals and `LOOMCYCLE_AUTH_TOKEN` are unaffected. Outside strict mode it
+fails the load. **For this plugin:** under `gate_only` a hand-minted user token
+in `auth_token` stops working — use `loomcycle login` or an operator token.
 
 ### External gates in depth (v1.126.0)
 
@@ -311,6 +429,14 @@ auth:
   the whole sign-in. A `pending` user gets `access_denied`, no code.
 - The token never exceeds the user: scopes from `access_mode`, capped by the
   session and the client's `restrictions`. Web UI sign-out does not end it.
+- **The `loomboard` preset (v1.127.0):** `LOOMCYCLE_PRESETS=…,loomboard`
+  declares the `loomboard` client with what is the same on every install — the
+  desktop loopback callback `http://127.0.0.1/auth/callback` (any port), the
+  scheme `com.loomboard.app:/auth/callback`, and the Tauri origins
+  (`tauri://localhost`, `http://tauri.localhost`). Add the web app's callback
+  and origin yourself with an `!append` layer (a plain list in a later layer
+  replaces the preset's). People enter `LOOMCYCLE_PUBLIC_URL` itself as
+  loomboard's Base URL.
 - **Runtime clients:** the MCP `clientdef` tool (or `POST /v1/_clientdef`) —
   ops `create`, `update`, `get`, `list`, `retire`, `verify`; fields under
   `client`. Needs `substrate:tenant`: a tenant operator registers apps for its
@@ -363,3 +489,11 @@ gate's provisioning floor (`403 target_beyond_floor`).
 | A promoted user's token still has old scopes | The token is `frozen`; re-mint, or use `inherit` (`LOOMCYCLE_TOKEN_AUTHORITY_INHERIT=1` or `"authority": "inherit"`). |
 | `/.well-known/oauth-authorization-server` is 404 | `LOOMCYCLE_PUBLIC_URL` is unset. |
 | `loomcycle login` refused on Windows | Not supported there; set `LOOMCYCLE_MCP_UPSTREAM_TOKEN`. |
+| Config fails to load after upgrading to v1.130.0+ | A misspelt or stale key under `auth.gates.<name>` / `new_user`; the error names the allowed keys. |
+| `google` gate with `allow_any_account` refuses to load | Combined with `allowed_domains`, or a stranger could be admitted unapproved — use `provision: known`, or `auto` with `new_user.status: pending`. |
+| Google via `generic` / another OIDC preset refuses to load (v1.132.0+) | Use `preset: google`. |
+| `401 second_factor_required` at a password gate | The account has a passkey; confirm with it. |
+| `403 second_factor_unavailable` | The account has a passkey that can't be used now (public URL changed, keys refused) and no authenticator app. An operator clears credentials, then issues a reset. |
+| `403 user_tokens_gate_only` / a pasted user token refused everywhere | `auth.strict.user_tokens: gate_only`; get the token from a gate (`loomcycle login`). |
+| A pasted user token no longer opens the Web UI (strict) | Since v1.127.0 strict mode accepts only gate sign-ins in the browser. |
+| SCIM `429` | `max_sync_creates` / `max_sync_removals` reached for the rolling 24 h. |

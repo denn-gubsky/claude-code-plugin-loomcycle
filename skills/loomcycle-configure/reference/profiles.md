@@ -9,7 +9,7 @@ Cross-check every var against [env-vars.md](env-vars.md); routing yaml lives in
 env file.** Never put a secret value in any file.
 
 Things that changed under every profile since these were first written (current
-as of **v1.126.0**):
+as of **v1.135.0**):
 
 - **Filesystem access is a YAML `volumes:` block, not env.** The
   `LOOMCYCLE_READ_ROOT` / `LOOMCYCLE_WRITE_ROOT` / `LOOMCYCLE_BASH_CWD` jail was
@@ -18,7 +18,21 @@ as of **v1.126.0**):
 - **Routing can come from an embedded preset.** `LOOMCYCLE_PRESETS=base` supplies
   the provider matrix, aliases and tiers; your own `--config` layers on top. The
   YAML skeletons below assume that (or your own `tiers:` — see routing.md).
-  The agent tool-allowlist key is `tools:`.
+  The agent tool-allowlist key is `tools:`. Two opt-in additions:
+  `knowledge-base` (v1.128.0 — the `kb/linker` links agent for statements; see
+  [knowledge-base.md](knowledge-base.md)) and `loomboard` (v1.127.0 — the
+  loomboard app's sign-in client; see [identity.md](identity.md)), e.g.
+  `LOOMCYCLE_PRESETS=base,knowledge-base,loomboard`.
+- **Sign-in gate keys are strict (v1.130.0).** A misspelt or stale key under
+  `auth.gates.<name>` or its `new_user` block now **fails the config load**.
+  Run `loomcycle validate` over your config before upgrading to v1.130.0+.
+- **Upgrading to v1.128.0+ with SQL Memory / Documents: take a runtime
+  snapshot first** (`POST /v1/_snapshot`, which includes SQL Memory — a
+  non-superuser `pg_dump` can't capture it). The upgrade rebuilds each scope's
+  statements table on first use and, on Postgres, moves the document tables
+  (below). Memory `sql_query` / `sql_exec` also stop reaching Document tables
+  (`document_tables_reserved`) — an agent that read them that way must use
+  `Document op=query_chunks`.
 - **No credential = open mode, and open mode stays on loopback (v1.119.0).** A
   server with no `LOOMCYCLE_AUTH_TOKEN`, no config `principals:` and no admin
   operator token serves every route unauthenticated — and now **exits at boot**
@@ -384,6 +398,7 @@ The closed scope catalog (an unknown scope is refused):
 | `runs:delete` | **(v1.112.0)** Delete a run tree (`delete_run_tree`, `DELETE /v1/runs/{id}/tree`). Tenant-implied; a member or isolated user has it only when granted by name. |
 | `llm:gateway` | **(v1.112.0)** The raw model endpoints (`/v1/_llm/chat`, `/v1/chat/completions`, `/v1/embeddings`) — metered and budget-checked. Tenant-implied and admitted for a non-isolated member; an **isolated** user's token needs it by name. |
 | `auth:manage` | **(v1.123.0)** A website's user-management token (password gate + `/v1/_users`), across tenants and nothing else. Must be the token's only scope; refused over gRPC. See [identity.md](identity.md). |
+| `scim:provision` | **(v1.127.0)** An identity provider's SCIM 2.0 credential for a `kind: scim` gate: `/scim/v2/*` in its own tenant and nothing else. Must be the token's only scope; refused over gRPC. See [identity.md](identity.md). |
 
 **Restricted tokens (v1.112.0)** — for a token handed to a machine you do not
 control. Each restriction is set at mint (`operator-token create`, the
@@ -417,8 +432,14 @@ header (Cloudflare Access / ALB / forward-auth), AWS IAM, device-code and
 external (signed-assertion, for bridges and apps) gates issue per-user tokens,
 and `loomcycle login` stores a terminal's token in the OS keychain (which
 `loomcycle mcp --upstream` uses when `LOOMCYCLE_MCP_UPSTREAM_TOKEN` is unset).
-External and device gates need `LOOMCYCLE_PUBLIC_URL`. See
-[identity.md](identity.md).
+External and device gates need `LOOMCYCLE_PUBLIC_URL`. Since v1.127.0:
+passkeys (a second factor at a password gate, or a password-less
+`kind: passkey` gate — relying party `LOOMCYCLE_PUBLIC_URL`), SCIM provisioning
+(`kind: scim`), and `auth.strict.user_tokens: gate_only`, which refuses
+hand-minted per-user tokens everywhere (a pasted per-user token in this
+plugin's `auth_token` then stops working — use `loomcycle login`). In strict
+mode a hand-minted per-user token is never a Web UI sign-in, with or without
+`gate_only`. See [identity.md](identity.md).
 
 **Access control (v1.122.0).** Per-user and per-group ACL rule lists, nested
 groups and bindings, explicit deny over allow, intersected with each agent's
@@ -448,14 +469,30 @@ no longer start runs over MCP. Tools added since (v1.108.0–v1.126.0): `file`
 and `evaluation` need `runs:read`; `delete_run_tree` needs `runs:delete`;
 `list_team_channels` / `peek_team_channel` need `channel:read` and
 `release_team_channel` needs `channel:publish`; `groupdef`, `acldef`,
-`aclbinding`, `clientdef`, `crypto` and `retention_override` need
-`substrate:tenant`; `identity` needs nothing beyond a non-isolated token. Stdio, admin, legacy and `substrate:tenant`
+`aclbinding`, `clientdef`, `crypto`, `retention_override` and `ontology`
+(subject merge / bind, v1.131.0) need `substrate:tenant`; `identity` needs
+nothing beyond a non-isolated token; `review` (v1.133.0) needs no scope by name
+— each statement asks whether the caller may rule (an operator, or a member
+holding the access-control `review` verb). Stdio, admin, legacy and `substrate:tenant`
 sessions are unchanged.
 
 Routing: use `user_tiers:` privacy boundaries (routing pattern 4) so a tenant's
 high tier never escapes the anthropic/openai boundary. **No anthropic-oauth-dev**
 (single-operator only). No Bash to untrusted tenants — pair with profile 3 tool
 posture.
+
+**Postgres document plane (v1.128.0).** Each SQL Memory scope that holds
+documents gets a second schema and login role for the Document tool's tables —
+`sqlmem_d_<h>` / `sqlmem_dr_<h>`, beside the agent's `sqlmem_s_<h>` /
+`sqlmem_r_<h>` — and neither role can reach the other's schema, so the engine
+enforces that an agent's Memory SQL cannot touch documents. The admin role
+still needs `CREATEROLE`. **`pg_hba` must admit the new `sqlmem_dr_…` login
+roles wherever it lists the scope roles (`sqlmem_r_…`) individually**; a rule
+by pattern or `all` needs nothing. The first Document op on an older scope
+waits while its rows are copied (bounded at 10 minutes per scope; a failed copy
+is retried on the next op, nothing half-moved). `Document op=query_chunks` raw
+`sql` now runs as the Document role, so it can no longer read an agent's own
+tables. On sqlite a scope stays one file and a statement check is the boundary.
 
 **Sharp edges:** creating the *first* admin-scoped `OperatorTokenDef` disables
 the legacy `LOOMCYCLE_AUTH_TOKEN` for inbound HTTP (the no-lockout gate) — which
@@ -527,6 +564,12 @@ A **team walk does not move**: one left running by a stopped instance is ended
 - Upgrade every replica together when moving to v1.119.0+ with
   `LOOMCYCLE_SECRET_KEY` set — an older replica cannot read peppered token
   hashes.
+- **Upgrade every replica together when moving to v1.128.0+** (snapshot
+  first): an older replica knows neither the statement columns nor the Postgres
+  document plane — it writes documents into the agent schema, and once a newer
+  replica has moved that scope those writes are dropped (with a warning).
+  Likewise v1.127.0+ before configuring passkeys, SCIM or `gate_only` (older
+  replicas have no handling for them).
 - Access-control sets are cached per replica for
   `LOOMCYCLE_ACL_CACHE_TTL_SECONDS` (default 5) at worst; writes invalidate
   over the cluster bus.
