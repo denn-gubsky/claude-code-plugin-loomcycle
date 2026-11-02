@@ -1,4 +1,4 @@
-# Access control reference (v1.122.0+; checked against v1.126.0)
+# Access control reference (v1.122.0+; checked against v1.135.0)
 
 A token's scopes name **kinds** of thing (`runs:create`, `substrate:tenant`), never
 instances, and never deny. Access control adds authority **per user and per group**:
@@ -41,7 +41,7 @@ A selector is `<type>:<name>`, and the name takes one of three shapes:
 
 The catalog is closed: adding a type or verb is a code change. **`acldef op=catalog`
 is the authoritative list** for the running build — ask it before writing a rule.
-At v1.126.0:
+At v1.135.0:
 
 | Type | Verbs | Selector |
 |---|---|---|
@@ -55,7 +55,7 @@ At v1.126.0:
 | `search` | use | glob |
 | `memory` | read, write, recall, browse | `user`, `agent`, `tenant`, `global` |
 | `sqlmem` | read, write | `user`, `agent`, `tenant` |
-| `document` | read, write, delete, link, browse | `agent`, `user`, `tenant` (then `:<path glob>`) |
+| `document` | read, write, delete, link, browse, propose, review | `agent`, `user`, `tenant` (then `:<path glob>`) |
 | `history` | read | enum `self`, `user`, `tenant`, `global` |
 | `channel` | publish, subscribe, ack, await, broadcast, manage | glob |
 | `def` | author, retire, read, manage | `def:<family>/<glob>`; families: agent, skill, team, mcpserver, schedule, webhook, volume, a2a, a2aserver, hook, credential, memorybackend, documentsource, acl, group, client |
@@ -67,12 +67,32 @@ At v1.126.0:
 | `evaluation` | submit, read | enum `self`, `siblings`, `descendants`, `any` |
 | `interruption` | raise, resolve | glob |
 | `run` | read, delete, steer, cancel, compact, retune, review | enum `own`, `tenant` |
-| `principal` | read, manage, mint | `user`, `group`, `token` |
+| `principal` | read, manage, mint | `user`, `group`, `token`, `scim` (`principal:scim:users`, `principal:scim:groups` — v1.127.0) |
 | `runtime` | read, manage | enum: pause, snapshot, limits, retention, erasure, usage, routing, events, config, tenants, metrics |
 | `git` | fetch, push | glob (remote host and path) |
 
 Because `acl` and `group` are `def:` families, authoring a list is itself an
 access-control decision (`author def:acl/<name>`).
+
+**The two statement verbs on `document`** (see
+[knowledge-base.md](knowledge-base.md) and [document.md](document.md)):
+
+- **`propose`** (v1.128.0) — file a relation for review without changing
+  anything live: `propose_statement`, every `maintain_statement` action,
+  `lease` / `release`. Narrower than `link` (which makes relations live and
+  covers `accept_statement` / `reject_statement`); every built-in list grants
+  it wherever it grants `read`. A principal with only `read` + `propose` cannot
+  add evidence to an asserted relation.
+- **`review`** (v1.133.0) — a **member's** ruling on proposed statements, asked
+  on the statement's from-document: bulk rulings and their revert (the MCP
+  `review` tool, `/v1/_statements/rule`), and since v1.134.0 a single
+  `accept_statement` / `reject_statement` in the tenant scope too. Held only by
+  a rule that names it — **no member baseline grants it**, and it implies
+  nothing else (the member still needs `read` to see the queue rows):
+  `{"effect":"allow","actions":["review"],"resources":["document:tenant:/board/**"]}`.
+  Admins and tenant operators rule without it (with `write` on the
+  from-document and `link` on both ends); isolated users, agent-limited tokens
+  and runs are refused regardless. Applying a review policy stays operator-only.
 
 ### `when` — the closed condition set
 
@@ -199,12 +219,15 @@ the ceiling. Names carry the `builtin:` prefix, which a stored list can never us
 |---|---|---|
 | `builtin:admin` | `substrate:admin` | every verb on every type |
 | `builtin:tenant-operator` | `substrate:tenant` | every verb in its tenant except the operator plane; its MCP meta-tools by name |
-| `builtin:member` | a non-isolated member | the collaboration plane: runs, agents, its definitions, memory/SQL/documents in user, agent and tenant scopes, channels, its MCP tools by name (incl. `authz`, not `groupdef`/`acldef`/`aclbinding`) |
+| `builtin:member` | a non-isolated member | the collaboration plane: runs, agents, its definitions, memory/SQL/documents in user, agent and tenant scopes, channels, its MCP tools by name (incl. `authz` and `review`, not `groupdef`/`acldef`/`aclbinding`/`ontology`). Reaching `review` is not ruling: each statement asks the `review` verb, which this list does not hold |
 | `builtin:isolated` | `substrate:user` | own scope only; denies tenant and global memory, tenant SQL memory and documents, tenant/global history; on MCP only `credentialdef`, `evaluation`, `authz` |
 | `builtin:run-plane` | a token limited to certain agents | denies definition writes, `run team:*`, the gateways, schedule/webhook `manage`, and run deletion |
 
 There is also `builtin:auth-manager` for the `auth:manage` user-management
-credential (the user roster only).
+credential (the user roster only), and `builtin:scim-provisioner` (v1.127.0)
+for a `scim:provision` credential: `read` / `manage` on `principal:scim:*` in
+its own tenant, `mint` denied on every principal — what `/scim/v2` asks (see
+[identity.md](identity.md)).
 
 Two consequences worth knowing: `builtin:run-plane`'s `deny run team:*` holds in
 `compat` too, so **an agent-limited token's runs cannot start team walks**; and in
@@ -233,7 +256,7 @@ Two consequences worth knowing: `builtin:run-plane`'s `deny run team:*` holds in
 | Where | Question |
 |---|---|
 | Definitions (all families) | `get`/`list`/`verify`/`render_diagram` → `read def:<family>/<name>`; `retire`/`delete`/`purge` → `retire`; `create`/`fork`/`promote`/hook edits/any other op → `author`. A `def_id` is asked of the name it resolves to |
-| Document | `read` / `write` / `delete` / `link` of `document:<scope>:<path>` at each Path name it is filed under (the bare scope if filed nowhere); a new document is checked against the name it is about to get. Ops that reach a whole scope (search, recall, upsert…) are refused when any rule denies part of it |
+| Document | `read` / `write` / `delete` / `link` (and `propose` / `review` for statements) of `document:<scope>:<path>` at each Path name it is filed under (the bare scope if filed nowhere); a new document is checked against the name it is about to get. Ops that reach a whole scope (search, recall, upsert…) are refused when any rule denies part of it |
 | Path | the type each entry names: `document:`, `memory:<scope>`, `volume:<name>`; `rm`/`mv` cover the whole subtree, `mv` under both names |
 | CredentialDef | `get` → `use credential:<scope>:<name>`; every write → `manage` |
 | TeamDef | `run` → `run team:<name>`; `poll` → `read`; `cancel` → `cancel` |

@@ -13,8 +13,8 @@ most of the work; picking the op is the easy part.
 | plane | tool | what lives there |
 |---|---|---|
 | key/value + vector | `memory` | facts, notes, counters, small state, embeddings |
-| per-scope SQL | `memory` (`sql_*`) | related tables, joins, aggregates, the entity graph |
-| chunked-graph documents | `document` | structured prose: bodies in memory, structure in SQL |
+| per-scope SQL | `memory` (`sql_*`) | the agent's own tables: joins, aggregates — never the Document tables |
+| chunked-graph documents | `document` | structured prose, facts, subjects and statements: bodies in memory, structure in SQL |
 | names | `path` | a Unix-like tree addressing all of the above |
 | past chats | `history` | conversation transcripts — what was actually said |
 
@@ -173,6 +173,18 @@ A fact about someone that lives outside their own scope and was written
 reaches it. That is a decision you are making at write time, not a gap someone
 can fix later.
 
+## Memory SQL does not reach documents (v1.128.0)
+
+`sql_query` / `sql_exec` share a database per scope with the Document tool, but
+refuse any statement naming a Document table or index (`documents`, `chunks`,
+`chunk_edges`, `chunk_edge_evidence`, `chunk_tags`, …) with
+`document_tables_reserved` — reading or writing. Read chunks and statements
+with `document` `op=query_chunks` (its raw `sql` escape hatch) or the Document
+ops. An agent whose **own** tables carry one of those names is refused too:
+rename them. On Postgres the boundary is enforced by the engine (a separate
+schema and login role per scope for the document plane), so `query_chunks`'
+raw `sql` can no longer read the agent's own tables either.
+
 ## The entity graph is bi-temporal — correct, don't overwrite
 
 Two independent time axes, and conflating them is the classic error:
@@ -196,6 +208,50 @@ Consequences worth internalising:
   superseded rows as well.
 - **The time format differs by tool.** `document` takes and returns unix
   nanoseconds (integers); `memory` takes RFC3339 strings.
+
+## Facts vs statements (v1.128.0)
+
+A **fact** is one claim, a chunk with a `natural_key`, `source_quote` and
+confidence, written with `upsert_chunk`. A **statement** is a *relation*
+between two chunks that carries how it was made (`method`), a status
+(`asserted`, `proposed`, `rejected`), confidence, validity and verbatim
+**evidence**. They meet in `upsert_chunk`:
+
+- `source_chunk_id` (with `source_quote`) — the document passage the fact was
+  taken from; the fact is linked to it `derived_from`, the quote must occur in
+  that passage, and recall reaches through to it. Deleting the passage keeps
+  the quote on the fact and marks it `source_gone`.
+- `about_ids` + `relation` — with two subjects, the fact also files a statement
+  of that kind between the first two (evidence: the fact). An undeclared kind
+  is filed for review; a conflicting live relation is reported in
+  `relation_conflicts`, never removed. Retiring the fact ends the statement
+  unless another fact states it or an operator accepted it.
+
+An agent proposes relations (`propose_statement`); accepting or rejecting one is
+a person's ruling, refused inside a run — over MCP, the `review` tool works the
+queue. Details: [knowledge-base.md](../loomcycle-configure/reference/knowledge-base.md)
+and [document.md](../loomcycle-configure/reference/document.md).
+
+## Subjects change identity — events and operator actions
+
+A subject is a document whose root carries a `natural_key`
+(`person:ada-lovelace`). When one changes, an event goes to the scope's
+`memory/subjects` channel: `adopted` (v1.130.0), `retyped`, `removed`,
+`merged` and `erased` (v1.131.0). A re-type must name an entity type the
+ontology declares.
+
+- **Merging two subjects** and **binding a subject to a user account**
+  (`fields.principal`) are operator-only: the MCP `ontology` tool
+  (`op: merge_subjects`, `op: bind_principal`), needing a `substrate:tenant`
+  or admin token. Never a Document op, and no agent may set `principal`.
+- Do not write new facts about a `merged` subject; use the one its
+  `fields.merged_into` names.
+- **Moving documents between scopes:** `document` `op=copy_documents`
+  (v1.135.0) copies a set (new ids, statements between members, Path names via
+  `path_map`); a dry run unless `dry_run: false`. Subject documents, documents
+  holding facts and the tenant ontology are refused. `move_documents` (after
+  v1.135.0) moves a set and **keeps every id**; a relation leaving the set
+  refuses the move unless `dangling: "drop"`.
 
 ## Documents and Path
 
@@ -284,7 +340,7 @@ Traps:
 ## Erasure — three tiers, and the one-shot residue
 
 Use the `erasure` tool (see `/loomcycle:erasure` for the full contract).
-The two things to carry into any answer:
+The things to carry into any answer:
 
 1. **It defaults to a dry run.** A live run needs `dry_run: false` AND `confirm`
    equal to the subject. Never pass those unless the user explicitly asked.
@@ -298,6 +354,11 @@ The two things to carry into any answer:
    field names what goes. Tokens holding `substrate:tenant` / `substrate:admin`,
    group bindings and config-declared memberships are kept and named under
    `retained` — the last must be removed from the config file.
+4. **Bound subjects (v1.131.0):** the report lists tenant subjects bound to the
+   user in `bound_subjects` (counted under tier 2 as `subject_bindings`;
+   hidden ones only counted in `bound_subjects_withheld`). A live run **clears
+   each binding** and announces `erased` on `memory/subjects`, but **deletes no
+   subject** — deleting one is a separate operator decision.
 
 ## Diagnosing "the agent forgot"
 

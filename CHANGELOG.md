@@ -4,6 +4,70 @@ All notable changes to this project are documented here. The format follows
 [Keep a Changelog](https://keepachangelog.com/) and the project adheres to
 [Semantic Versioning](https://semver.org/).
 
+## [1.12.0] — 2026-11-02
+
+**Brought up to loomcycle v1.135.0: the Document tool as a knowledge base.**
+Since v1.126.0 the runtime gained two MCP tools (`ontology`, `review`, for 68),
+and the Document tool went from 47 to 63 ops (64 with `move_documents`, on main after the v1.135.0 tag). The new ops cover statements with
+evidence, a sectioned tenant ontology, editions, classification, bulk review
+with a judge agent, subject merging, a scope-wide snapshot behind the Web UI's
+3D universe view, and copying documents between scopes. Three new commands, a
+new `knowledge-base.md` reference, and `document.md` rewritten. Version bump
+`1.11.0 → 1.12.0` (`plugin.json` + `marketplace.json`).
+
+### Added
+
+- **`/loomcycle:documents`**:
+  - `copy` (`copy_documents`: dry run first; renders the refused and dangling
+    lists);
+  - `move` (`move_documents`, after v1.135.0: keeps every id; dry run, then
+    `expect_count`; a relation leaving the set blocks it unless
+    `--drop-dangling`; an interrupted move resumes on the same call);
+  - `snapshot` (`graph_snapshot`, decoded into a summary by type, path and
+    relation kind; reports whether the scope has a 3D map);
+  - `classify` (report-only by default).
+- **`/loomcycle:kb-review`** (`review`): queue summary first; `accept` /
+  `reject` as a dry run, then `expect_count`; `policy` (`apply_policy`),
+  `revert`, `rulings`. Named apart from `/loomcycle:review`, which rules on run
+  answers.
+- **`/loomcycle:subjects`** (`ontology`): `merge` (shows both subjects and
+  confirms first, since a merge is irreversible), `bind` / `unbind`.
+- **`skills/loomcycle-configure/reference/knowledge-base.md`**:
+  - statements, evidence and who rules;
+  - the sectioned ontology (document classes, citation grammars with `scope:` /
+    `anchor:`, relation kinds, schemes, instances, `@boilerplate`, the Review
+    section);
+  - editions and `classify`;
+  - review policies, the judge and its audit sample;
+  - subject merge, binding and events;
+  - the `knowledge-base` bundle (`kb/linker`);
+  - upgrade notes and troubleshooting.
+
+### Changed
+
+- **`reference/document.md`** rewritten for 64 ops, with `move_documents`, UMAP
+  projection and the member-safe document change feed. The knowledge-base topics
+  moved to the new page, with pointers. New sections: `copy_documents`,
+  `graph_snapshot` and the universe view, the 3D projection
+  (`memory.projection`), the Memory SQL boundary. `graph_recall`'s new arguments
+  and its body text are covered, as are search `expand` / `related_to` / concept
+  filters / `memory.fulltext`, and `get_edges` paging.
+- **`reference/mcp-tools.md`**: 68 tools; a knowledge-base section
+  (`document` for single statements versus `review` in bulk, and `ontology`);
+  `copy_documents` versus `export_md` + `import_md`; the reach counts (56
+  tenant-confinable, 29 scope-gated, with `ontology` on `substrate:tenant`;
+  `review` checked per statement).
+- **`/loomcycle:memory`**: `sql` cannot name Document tables
+  (`document_tables_reserved`).
+- **Reference pages:**
+  - `identity` (passkeys, SCIM, `gate_only`, Google `allow_any_account`, pending
+    sign-ups, strict gate keys, wider user ids);
+  - `access-control` (the document verbs `propose` and `review`, SCIM);
+  - `files` (ODT, PDF tables, the `drop` heading, `reimport`);
+  - `env-vars`, `routing` (`memory.classifier`), `token-limits` (`classify`,
+    usage speed), `profiles` (presets, the Postgres document plane);
+  - the `loomcycle-memory` skill.
+
 ## [1.11.0] — 2026-10-28
 
 **Brought up to loomcycle v1.126.0.** The runtime went from 54 to 66 MCP tools:

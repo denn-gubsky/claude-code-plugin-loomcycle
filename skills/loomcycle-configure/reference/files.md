@@ -1,4 +1,4 @@
-# Files reference — the run inbox and the File tool (v1.122.0+; checked against v1.126.0)
+# Files reference — the run inbox and the File tool (v1.122.0+; checked against v1.135.0)
 
 A tool call is text, so a file cannot reach a model as one: base64 is too long to hold, too easy
 to corrupt, and unreadable anyway. Since **v1.122.0**, when a tool returns a file loomcycle keeps
@@ -15,7 +15,9 @@ kept gives `[file not kept: <why> · …]`. Either way, **its bytes never reach 
 
 Version map: v1.122.0 inbox, capture, `File` tool, extraction · v1.123.0 OCR on `extract`, the
 `transcription` event · v1.124.0 the download/upload URL check · v1.125.0 `transcribe`, import
-provenance and `source`, the HTTP route and inbox downloads · v1.126.0 import `headings`.
+provenance and `source`, the HTTP route and inbox downloads · v1.126.0 import `headings` ·
+v1.128.0 `import` reaches edition reimport · v1.128.1 heading `drop` · v1.135.0 ODT extraction,
+PDF tables, OpenDocument sniffing.
 
 ---
 
@@ -62,6 +64,11 @@ A bad value refuses the boot.
 | HTTP and WebFetch responses | the body is binary (by Content-Type, then a sniff, then the URL extension). The text path is unchanged |
 | WebFetch with `assets: true` | the page's images and its links to PDFs, images and Office files, under the page's own host policy and WebFetch's hooks, at most `assets_max` (default 20, ceiling 100) |
 
+**Typing an OpenDocument file (v1.135.0).** An ODF package stores its media type as the zip's first
+entry, inside the head the sniffer reads, so an attachment named without an extension (or with the
+wrong one) settles as the type it declares instead of `application/zip`, and `extract` picks the
+ODT reader. `.odt` / `.ott` are in the extension table for a package without that entry.
+
 `binary_results` is `passthrough` (default) or `capture`, set on yaml `mcp_servers.<name>` or on an
 `MCPServerDef` (create / fork); it is part of the def's content hash. Opt in only for a server that
 returns files as base64 text — a long opaque token could otherwise look like one.
@@ -106,9 +113,9 @@ for the default volume, or a bare path (= the inbox).
 | `clear` | empty the inbox, or one folder of it | `prefix` | — |
 | `download` | GET a URL into the inbox (or a volume) | `url`, `to`, `overwrite`, `headers`, `max_bytes` | `HTTP`; plus `Write` into a volume |
 | `upload` | PUT/POST a file to a URL, whole or ranged for an upload session | `from`, `url`, `method`, `content_type`, `headers`, `ranged`, `chunk_bytes` | `HTTP`; plus `Read` from a volume |
-| `extract` | DOCX / XLSX / PPTX / PDF / HTML / CSV / TSV / text / captions / image → Markdown in `extracted/`, pictures kept as files, plus a fenced excerpt; a recording is handed to `transcribe` | `path`, `images`, `max_rows`, `excerpt_chars`, `ocr`, `language`, `dry_run` | `Read` for a non-inbox source |
+| `extract` | DOCX / ODT / XLSX / PPTX / PDF / HTML / CSV / TSV / text / captions / image → Markdown in `extracted/`, pictures kept as files, plus a fenced excerpt; a recording is handed to `transcribe` | `path`, `images`, `max_rows`, `excerpt_chars`, `ocr`, `language`, `dry_run` | `Read` for a non-inbox source |
 | `transcribe` | audio / video → timed Markdown transcript in `extracted/` via the speech-to-text engine | `path`, `language`, `vocabulary`, `diarize`, `timestamps`, `to`, `dry_run` | `Read` for a non-inbox source |
-| `import` | build a Document from such Markdown, `extract`'s pictures attached as image chunks | `path`, `title`, `doc_path`, `scope`, `tags`, `source`, `headings` | `Document` and its scope grants |
+| `import` | build a Document from such Markdown, `extract`'s pictures attached as image chunks; or reconcile a new edition onto a held work | `path`, `title`, `doc_path`, `scope`, `tags`, `source`, `headings`; `reimport`, `work_key`, `edition_date`, `amending_document_id` | `Document` and its scope grants |
 
 The inbox itself needs only `File`. Any other volume is reached with the run's own grants, and that
 tool's pre-hooks judge the call on the final path. `download` / `upload` go out under the HTTP
@@ -144,9 +151,10 @@ become Markdown structure. Extraction times out after 60 s.
 | Type | Output |
 |---|---|
 | DOCX | title as `#`, Word headings below it, paragraphs, lists, tables, pictures in place |
+| ODT (v1.135.0) | as DOCX, for OpenDocument text: GFM tables (merged cells kept empty so columns align), numbered lists, pictures; tracked deletions, comments and bookmarks left out, footnotes marked `[n]` and listed under `## Notes`. A package whose own mimetype entry is not ODF text, or an encrypted one, is refused |
 | XLSX | a `##` per sheet, one table of computed values (not formulas), first `max_rows` rows (default 1000) then `[+N rows omitted]` |
 | PPTX | `## Slide N — <title>` per slide, text and tables, pictures, speaker notes as a quote |
-| PDF | `## Page N` per page from the text layer; JPEG / JPEG 2000 pictures copied byte for byte, other encodings counted in `notes` |
+| PDF | `## Page N` per page from the text layer; JPEG / JPEG 2000 pictures copied byte for byte, other encodings counted in `notes`. Tables become GFM tables (v1.135.0), below |
 | HTML | headings, paragraphs, lists, tables; images become links, nothing is fetched |
 | CSV, TSV | one table |
 | text, Markdown | the text; Markdown keeps structure, without raw HTML or embedded images |
@@ -162,6 +170,16 @@ per-entry ratio, no entry name used as a path); XML is parsed strictly with no D
 2000 pages, 200 000 characters and 32 MiB of decoded content per page; **every encrypted PDF is
 refused**, even one that opens without a password. Old binary `.doc` and archives cannot be
 extracted.
+
+**PDF tables (v1.135.0).** A table the page **draws with borders** (lines joining into a grid of at
+least 2×2 cells; a missing inner border merges cells) becomes a Markdown table in reading order. A
+table printed **without borders** is read from **aligned columns**: three or more lines that each
+start cells at shared column positions, with at least **three** columns — so two-column prose and
+a borderless label | value form stay text. Each line is a row (a wrapped cell continues in the
+row below with the other cells empty); a line running across a column start ends the table.
+Text outside tables reads as before. Work is bounded per page (lines, path points, 64 columns,
+2000 rows per table); a page past a bound is read as plain text with a note, and the report counts
+both kinds of table.
 
 **Spotting a scan.** `yield_chars_per_page` is reported where pages are known; `low_yield_pages`
 lists a PDF's likely scanned pages and `notes` says so in words. A near-zero yield is the trigger
@@ -279,12 +297,27 @@ the chosen `scope` (`agent`, `user` default, `tenant`), and SQL Memory enabled �
   ≤ 2 KiB, no user info; signed query parameters are masked. Pass the item's web link (SharePoint
   `webUrl`, a message's `webLink`), **never a download or upload link**.
 - **`headings` (v1.126.0)** structures a file whose sections show only by numbering (a PDF export),
-  applied to the text as read — the file is untouched, so provenance holds:
+  applied to the text as read — the file is untouched, so provenance holds (removing the added
+  lines and putting back the dropped headings gives the file's text back):
   - `{line, level, as: "heading"}` — line N becomes a heading; `lines` (≤ 10) joins a wrapped title.
   - `{line, level, as: "marker", title}` — a one-line `title` (≤ 300 chars) is inserted before line
     N, which stays body text (a numbered paragraph).
-  - Levels 2–6, increasing line order, ≤ 10 000 entries; one bad entry refuses the whole import.
-    `provenance.structured: {headings, by}` records the count and the run.
+  - `{line, as: "drop"}` (v1.128.1) — removes line N, which must already be a Markdown heading,
+    with its line break, so the text either side reads on as one section. Use it on a PDF
+    extract's `## Page N` headings so a section running over a page break is not split. A drop
+    takes no `level`, `title` or `lines`; drops and additions mix in one call, line numbers
+    counting over the file as it is. (A drop does not track code fences.)
+  - Levels 2–6, increasing line order, ≤ 10 000 entries; one bad entry (a drop of a body line
+    included) refuses the whole import. `provenance.structured: {headings, dropped, by}` records
+    the counts and the run (`dropped` left out when 0).
+- **A new edition (v1.128.0).** `reimport: true` with the work's `work_key` (and optional
+  `edition_date` in unix nanoseconds, `amending_document_id`) reconciles the file onto the document
+  holding that key part by part, as Document `import_md` with `reimport` does — unchanged and moved
+  parts keep their ids and links, changed parts are superseded, removed parts close, nothing is
+  deleted; no holder yet imports it as the first edition. Pictures are not attached to changed
+  parts; `doc_path` and `source` apply only to a first edition. The result carries `import_md`'s
+  `reimport` report and `changed_chunk_ids` instead of chunk counts. See
+  [knowledge-base.md](knowledge-base.md) for editions and statements.
 
 ```json
 {"op": "import", "path": "volume:inbox:extracted/NBU-064.md", "scope": "tenant",
@@ -293,6 +326,16 @@ the chosen `scope` (`agent`, `user` default, `tenant`), and SQL Memory enabled �
  "headings": [
    {"line": 593, "level": 2, "as": "heading"},
    {"line": 594, "level": 3, "as": "marker", "title": "1. Scope of the regulation"}
+ ]}
+```
+
+A PDF extract imported by sections, not pages — drop the page headings, add the real ones:
+
+```json
+{"op": "import", "path": "volume:inbox:extracted/Polozhennya.md", "scope": "tenant",
+ "headings": [
+   {"line": 3, "as": "drop"}, {"line": 5, "level": 2, "as": "heading"},
+   {"line": 9, "as": "drop"}, {"line": 13, "level": 2, "as": "heading"}
  ]}
 ```
 
@@ -338,7 +381,9 @@ An operator session has no inbox of its own, so `file` acts on the inbox of a ru
 named by `run_id` (as `get_run` / `list_runs` report it; a sub-run's id reaches its tree's inbox).
 It runs the same `File` tool, on that inbox only. Needs **`runs:read`** (like `get_run`) and is
 tenant-confined: another tenant's run, or one the caller may not read, answers as missing. Input is
-strict — an unknown or repeated field is refused.
+strict — an unknown or repeated field is refused. Its `extract` reads the same formats as the
+in-run tool; since v1.135.0 the tool description lists them all (DOCX, ODT, XLSX, PPTX, PDF, HTML,
+CSV, text, image) — PDF was missing from it before, though extract always read PDFs here.
 
 | op | Who may |
 |---|---|
@@ -381,5 +426,8 @@ has `runFile` and `downloadRunInboxFile`.
 | `extract` refuses an encrypted PDF | Every encrypted PDF is refused; decrypt upstream |
 | `transcribe` refused naming `media.command` | The file cannot go whole (format, > 25 MB, or too long). Set `transcription.stt.media.command` (ffmpeg) |
 | `import` result has `provenance_note`, no `source/…` tag | The inbox file was changed after capture. Use `headings` instead of rewriting the file |
+| A PDF table still reads as run-on lines | Borderless with only two columns (read as text on purpose), or the page passed a work bound (`notes` says so). Re-export with borders, or as ODT/DOCX |
+| `extract` says no extractor reads an attachment | Pre-v1.135.0 for ODT; on v1.135.0+ check the package's mimetype entry is ODF text and it is not encrypted |
+| A section of an imported PDF is split at a page break | Drop the `## Page N` heading with `{"line": N, "as": "drop"}` (v1.128.1+) |
 | MCP `file` says the inbox is gone | The run ended. Keep or download files while it runs |
 | MCP `file` call rejected with a type error after upgrading | Claude Code caches tool schemas at connection — reload the plugin |

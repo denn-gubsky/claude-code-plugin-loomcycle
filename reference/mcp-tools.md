@@ -13,7 +13,7 @@ clusters where two tools sound alike, which one owns which job, and the traps
 that cost a wasted call. For the authoritative text of any one tool, ask the
 session: `context` with `op=doc` returns a tool's full schema.
 
-**66 tools** as of loomcycle v1.126.0. The tool your session holds may be
+**68 tools** as of loomcycle v1.135.0. The tool your session holds may be
 fewer: your token's scopes and access-control rules remove tools from the list
 (see *What your token can reach*).
 
@@ -39,6 +39,8 @@ fewer: your token's scopes and access-control rules remove tools from the list
 | Know who your token acts as | `identity` (`op=whoami`) |
 | Ask whether you may do something | `authz` (`op=evaluation`) |
 | Know what agents exist | `list_agents` |
+| Work the queue of proposed relations | `review` |
+| Copy or move documents to another scope | `document` (`op=copy_documents` / `op=move_documents`) |
 
 ---
 
@@ -245,8 +247,58 @@ The split is by **shape**, not by topic:
   `op=sync` moves content.
 - `memorybackenddef` decides where memory lives, not what is in it. Repointing
   an agent at another backend migrates nothing.
+- **`memory` SQL cannot touch the Document tool's tables** (v1.128.0+): a
+  statement naming `documents`, `chunks`, `chunk_edges`, … is refused
+  `document_tables_reserved`. Use `document` `op=query_chunks`.
+- **Moving documents between scopes:** `document` `op=copy_documents` (v1.135.0)
+  copies up to 500 documents server-side with their history, images and the
+  relations between them. `export_md` + `import_md` would mint new ids, keep only
+  the current text and drop every relation. It is a dry run unless
+  `dry_run: false`. **`op=move_documents`** (on main after v1.135.0) moves a set
+  and keeps every id. A relation leaving the set refuses it unless
+  `dangling: "drop"`, and a real move needs the dry run's count as
+  `expect_count`. An interrupted move resumes when the same call runs again. See
+  `/loomcycle:documents copy` / `move`.
+- **A whole scope at once:** `document` `op=graph_snapshot` (v1.135.0) returns
+  every document, chunk tree, relation and Path name as paged parallel columns,
+  with no bodies. It feeds the Web UI's 3D universe view. See
+  `/loomcycle:documents snapshot`.
 
 The `loomcycle-memory` skill covers this ground in full.
+
+### The knowledge base — statements, review, subjects
+
+Since v1.128.0 the `document` tool is also a knowledge base. A **statement** is
+a relation between two chunks with a kind, a status (`asserted`, `proposed`,
+`rejected`), a method, a confidence and **verbatim evidence**. The tenant
+ontology is a sectioned document that declares the classes, relation kinds,
+concept schemes and the review policy.
+
+| Tool | Owns | Who |
+|---|---|---|
+| `document` | One statement at a time: `propose_statement`, `accept_statement` / `reject_statement`, `list_statements`, `get_edge`; plus `classify`, `describe_ontology`, `extract_citations`, `resolve_anchor`, editions through `import_md` `reimport`. | per op: a run may propose; ruling is an operator's, or a member's with the `review` grant |
+| `review` | **Bulk** review: `queue` (with `summarize`), `rule` (dry run, then `expect_count`), `revert`, `rulings`, `apply_policy`. | ruling: an operator, or a member holding `review` on the document's path; reading the queue: any non-isolated member (rows it can read); `apply_policy` operators only |
+| `ontology` | Subjects: `merge_subjects` (irreversible), `bind_principal` (a subject is this user). | operators (`substrate:tenant`) |
+
+**Traps**
+
+- **`link_chunks` asserts; `propose_statement` asks.** An agent writing a
+  relation it inferred should propose it, with evidence.
+- **Evidence must occur verbatim** in its source, or the statement is refused.
+- **A rejection is a tombstone**: the same relation proposed again is refused
+  until the ruling is reverted. A review policy's or the judge's rejection is
+  only a verdict.
+- **Bulk rulings are two calls**: the dry run's `matched` must come back as
+  `expect_count`, or the call is refused `queue_changed`. Keep the `ruling_id`;
+  `revert` undoes exactly that ruling.
+- `get_edges` pages at 500 statements; follow `next_cursor` as `after`.
+- To rename a subject or change its type, edit its document; `ontology` only
+  merges and binds.
+- The runtime's own guide is `context` `{"op": "help", "topic":
+  "knowledge-base"}`, with call sequences.
+
+See `/loomcycle:kb-review`, `/loomcycle:subjects` and the `loomcycle-configure`
+skill's `reference/knowledge-base.md`.
 
 ### Decisions
 
@@ -474,11 +526,11 @@ restore_snapshot  delete_snapshot  pause_runtime     resume_runtime
 get_runtime_state resolve_probe    operatortokendef  list_channels
 ```
 
-The other **54 are tenant-confinable**: a tenant session may call them, and the
+The other **56 are tenant-confinable**: a tenant session may call them, and the
 runtime stamps your tenant on what you write and folds another tenant's rows to
 an opaque not-found on read.
 
-**2. Twenty-eight of those 54 also need a scope.** A token that lacks it does
+**2. Twenty-nine of those 56 also need a scope.** A token that lacks it does
 not see the tool:
 
 | Scope | Tools |
@@ -488,13 +540,15 @@ not see the tool:
 | `runs:delete` | `delete_run_tree` |
 | `channel:publish` | `publish_channel`, `ack_channel`, `release_team_channel` |
 | `channel:read` | `subscribe_channel`, `peek_channel`, `list_team_channels`, `peek_team_channel` |
-| `substrate:tenant` | `groupdef`, `acldef`, `aclbinding`, `clientdef`, `crypto`, `retention_override` |
+| `substrate:tenant` | `groupdef`, `acldef`, `aclbinding`, `clientdef`, `crypto`, `retention_override`, `ontology` |
 
 `substrate:tenant` implies every scope above, and `substrate:admin` implies
 everything. A member token (non-isolated, without `substrate:tenant`) has
 `runs:delete` only if it was granted at mint. The definition and data tools
 (`agentdef`, `memory`, `document`, `path`, `identity`, …) need no scope beyond
-being a non-isolated token of the tenant.
+being a non-isolated token of the tenant. `review` needs no scope either, but
+each statement asks whether the caller may rule on it: an operator's write, or
+a member's access-control `review` grant.
 
 One tool is gated per operation: `teamdef` is listed for any tenant token, but
 its `op=run` needs `runs:create`.

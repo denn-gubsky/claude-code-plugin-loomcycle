@@ -1,4 +1,4 @@
-# Token budgets reference — RFC AW (v1.11.0+; checked against v1.126.0)
+# Token budgets reference (v1.11.0+; checked against v1.135.0)
 
 Per-scope **monthly token budgets**: a `soft` ceiling (warn, the run continues)
 and a `hard` ceiling (refuse *new* runs at admission — or, with
@@ -97,13 +97,13 @@ operator-vs-tenant key split), `purpose`, `tier`, `user_tier`, `agent`
 (per-call detail only) and `class`. Usage is **reporting only** — also not an
 MCP tool. Set budgets against the numbers the Usage page shows.
 
-**What each row was for (v1.123.0 / v1.126.0).** Every model call the runtime
+**What each row was for (v1.123.0 / v1.126.0 / v1.128.0).** Every model call the runtime
 makes on someone's behalf is a row with a `purpose`:
 
 | class | purposes |
 |---|---|
 | **foreground** (a person or caller asked) | `chat` (an agent's own turns), `gateway` (`/v1/_llm/chat`, `/v1/chat/completions`) |
-| **background** (the runtime asked, to serve them) | `consolidation` (an `internal:` agent's turns), `rerank`, `decision`, `compaction`, `recap`, `unit_generation`, `image_description`, `embedding`, `ocr`, `stt`, `tts` |
+| **background** (the runtime asked, to serve them) | `consolidation` (an `internal:` agent's turns), `rerank`, `decision`, `compaction`, `recap`, `unit_generation`, `image_description`, `embedding`, `ocr`, `stt`, `tts`, `classify` (v1.128.0 — `memory.classifier` calls made by `Document op=classify`, charged to the classifying run; see [routing.md](routing.md)) |
 
 Each row also records the run's **`user_tier`** and, on an agent's own turns and
 gateway calls, the model **`tier`** it resolved through (`pinned` when the
@@ -120,6 +120,19 @@ and a filter per dimension by its own name (`model=a,b`, `tier=high`,
 `class=background`; values OR'd, dimensions AND'd — `tenant` stays the admin's
 focus, not a filter). The Web UI Usage pages have tabs for overview, models,
 providers, tiers, users, tenants (admin) and background.
+
+**Model speed and budget meters (v1.127.0).** `GET /v1/_usage/speed` (HTTP
+only; same scoping, `tenant` focus and filters as `/v1/_usage`) gives, per
+provider and model, from the latest 500 timed calls in the window:
+`duration_p50_ms`, `duration_p95_ms`, `ttft_p50_ms` and `output_tokens_per_s`.
+A tenant operator's figures come from its own calls only; timings live in the
+per-call ledger, so the window stops at `detail_since`. On the Usage pages the
+**Models** tab shows typical (median), slow (p95), first-token and tokens/s; the
+**Users** and **Tenants** tabs show month-to-date tokens against each budget as
+a meter — a tick at the soft limit, a straight-line projection to the end of the
+UTC month, and the state in words ("over the soft limit", "on course for the
+hard limit", "at the hard limit"). A viewer who cannot read budgets or speed
+still gets the rest of the report.
 
 Budgets and month-to-date usage travel in a snapshot: on restore a budget the
 target already has is kept, and the carried usage is not counted twice. Usage

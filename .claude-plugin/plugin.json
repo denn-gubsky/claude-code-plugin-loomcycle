@@ -1,8 +1,8 @@
 {
   "name": "loomcycle",
   "displayName": "loomcycle",
-  "version": "1.11.0",
-  "description": "Drive a loomcycle agentic runtime from inside Claude Code — spawn, fan out, retune, review and cancel runs, ask a decision model, snapshot, evaluate, read and write memory and documents, inspect and keep the files runs produce, see who your token is and what access-control rules allow, manage groups, rule lists and bindings, mint multi-tenant operator tokens, import .claude/ repos, and configure providers, model aliases, volumes, sandboxes, credentials, sign-in gates, access control, the File and Git tools and token budgets, all via slash commands and skills over loomcycle's bundled MCP server.",
+  "version": "1.12.0",
+  "description": "Drive a loomcycle agentic runtime from inside Claude Code — spawn, fan out, retune, review and cancel runs, ask a decision model, snapshot, evaluate, read and write memory and documents, copy documents between scopes, review knowledge-base relations in bulk, merge subjects, inspect and keep the files runs produce, see who your token is and what access-control rules allow, manage groups, rule lists and bindings, mint multi-tenant operator tokens, import .claude/ repos, and configure providers, model aliases, volumes, sandboxes, credentials, sign-in gates, access control, the knowledge base, the File and Git tools and token budgets, all via slash commands and skills over loomcycle's bundled MCP server.",
   "author": {
     "name": "Dennis Gubsky",
     "email": "dgubsky@waverleysoftware.com",
