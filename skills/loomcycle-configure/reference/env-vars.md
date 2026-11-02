@@ -187,6 +187,7 @@ root.
 | `LOOMCYCLE_DOCUMENT_SEARCH_FILTER_MAX_IDS` | 50000 | **(v1.123.0)** `Document op=search` / `op=related` filters (`under_path`, `type`, `status`, `tag`, `as_of`, …) resolve to a chunk-id list sent into every search leg; a filter needing more is refused (`filter_too_wide`) rather than post-filtered. |
 | `LOOMCYCLE_DOCUMENT_EVIDENCE_MAX_PER_EDGE` | 32 | **(v1.128.0)** Most verbatim evidence quotes one statement (a relation between chunks) may carry. See [knowledge-base.md](knowledge-base.md). |
 | `LOOMCYCLE_DOCUMENT_PROJECTION_INTERVAL` | (unset) | **(v1.135.0)** A Go duration (e.g. `1h`) overriding `memory.projection.interval`, the background sweeper that places document chunks on their scope's 3D map; a positive value also **enables** the projection, so the env alone turns it on. Needs Postgres + pgvector and `memory.embedder`. See [document.md](document.md). |
+| `LOOMCYCLE_DOCUMENT_FEED_MAX_STREAMS` | 4 | **(v1.135.0)** Concurrent `GET /v1/_document/feed` streams one principal may hold (the member-safe document change feed). The feed also needs `LOOMCYCLE_MEMORY_CHANGES_ENABLED`. See [document.md](document.md). |
 | `LOOMCYCLE_SQLMEM_PG_DSN` | (unset) | **Secret** — Postgres tier for SQL Memory. Its role needs `CREATEROLE` (per-scope login-role isolation; since v1.128.0 a scope holding documents gets a second `sqlmem_dr_…` login role — `pg_hba` must admit it, see [profiles.md](profiles.md)). `.env.local` only. |
 
 Other `LOOMCYCLE_SQLMEM_*` guardrails (`_ROOT`, `_QUOTA_BYTES`, `_MAX_ROWS`

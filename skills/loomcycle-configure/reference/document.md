@@ -1,4 +1,4 @@
-# Document primitive reference (v1.4.0+; 63 ops, checked against v1.135.0)
+# Document primitive reference (v1.4.0+; 64 ops, checked against v1.135.0 + `move_documents` from main)
 
 A `Document` is a **chunked-graph document**: instead of one opaque blob, it's a
 tree of **chunks** — each a first-class unit with a UUID, a hierarchy position,
@@ -49,13 +49,13 @@ agents:
 
 ## Operations
 
-The tool has **63 ops**. The `op` enum in the tool's input schema is the
+The tool has **63 ops** at v1.135.0 and **64** with `move_documents`. The `op` enum in the tool's input schema is the
 authority. Ops marked † are documented in [knowledge-base.md](knowledge-base.md);
 everything else is on this page.
 
 | group | ops |
 |---|---|
-| Documents (8) | `create_document`, `get_document`, `query_documents`, `documents_summary`, `graph_snapshot` (v1.135.0), `delete_document`, `set_path`, `copy_documents` (v1.135.0) |
+| Documents (9) | `create_document`, `get_document`, `query_documents`, `documents_summary`, `graph_snapshot` (v1.135.0), `delete_document`, `set_path`, `copy_documents` (v1.135.0), `move_documents` (after v1.135.0) |
 | Chunks (6) | `create_chunk` (`parent_id`/`position`/`after_id`), `get_chunk`, `update_chunk`, `delete_chunk`, `move_chunk`, `reorder_chunk` |
 | Facts (8) | `upsert_chunk`, `supersede_chunk`, `graph_recall`, `list_facts`, `judge_fact`, `verbatim_answer`, `verification_stats`, `remember` |
 | Relations (12) | `link_chunks`, `unlink_chunks`, `get_edges`, `backlinks`, `unlinked_mentions`, `get_edge`†, `propose_statement`†, `accept_statement`†, `reject_statement`†, `list_statements`†, `judge_statements`†, `maintain_statement`† |
@@ -233,11 +233,48 @@ each target name write. **Why not `export_md` + `import_md`?** That mints new
 ids, keeps only current bodies, drops every relation between the documents and
 pushes every body through the caller; the server copy keeps all of it.
 
-> **`move_documents` does not exist yet** — it is the next planned phase. To
-> move today: `copy_documents` with `dry_run: false`, check the result
-> (`refused`, `dangling`, `counts`), then `delete_document` each source
-> yourself. Relations listed as `dangling` never reach the copies, so they
-> disappear with the sources.
+## Moving documents between scopes — `move_documents` (after v1.135.0)
+
+`move_documents` moves a set of documents from `scope` into `to_scope` and
+**keeps every id**: the documents, their chunks and the relations between them.
+A reference to any of them still resolves, now in `to_scope`, and the source no
+longer holds them. It shipped on loomcycle main after the v1.135.0 tag, so it
+needs the next release. On v1.135.0 itself the op is unknown: copy, check, then
+`delete_document` each source (and accept new ids).
+
+- **Same selection as a copy:** `document_ids`, `under_path`, `under_paths`, at
+  most 500 per call, plus `path_map`. `to_scope` is required and **must differ**
+  from `scope`. To rename inside one scope, use `path` `op=mv`.
+- **Same payload as a copy**, plus the relations' statuses, rulings and
+  evidence.
+- **A relation cannot span two scopes.** A relation between a moved document
+  and one outside the set **refuses the move** (a dry run reports
+  `blocked_by: "dangling_relations"` with the list under `dangling`). Either add
+  the other documents to the set, or pass `dangling: "drop"` to delete those
+  relations with the source (reported under `dropped`).
+- **Two-step, like a bulk ruling.** It is a dry run unless `dry_run: false`, and
+  a real move also needs **`expect_count`**: the dry run's `counts.documents`.
+  If the set changed in between, it is refused and nothing moves.
+- **Crash-safe order:** write the target and verify it against the source, then
+  remove the source, then name the target. Until it is named, the target's
+  `query_documents` and `graph_snapshot` leave it out. **If a move is
+  interrupted, run the same call again**: it resumes. `to_finish` (dry run),
+  `resumed`, `moved` and `unfinished` (each with a code: `verify_failed`,
+  `source_not_removed` or `marker_not_cleared`) report where each document
+  stands. An unfinished document keeps its source.
+- **Refusals:** the copy codes (`not_found`, `is_ontology`, `is_subject`,
+  `holds_facts`, `forbidden`, `path_collision`, `key_collision`,
+  `write_failed`) plus **`id_collision`**: the target already holds a document
+  with that id. Under access control a move needs **write** on each source as
+  well as read, and write on each target name. A scope held by a lease (a links
+  agent pass) refuses until the lease ends.
+- Each moved document is announced on the target's `documents/ingested` with
+  reason **`moved`**, and each move is audited.
+
+**Copy or move?** Move when the documents should *live* elsewhere and anything
+holds their ids (notes, memory, statements from other documents in the target,
+links). Copy when the source must stay, or to make a duplicate in the same
+scope.
 
 ---
 
@@ -303,8 +340,19 @@ memory:
     interval: 1h         # background sweeper cadence; empty or 0 = no sweeper
     refit_after: 168h    # a basis this old is refitted …
     refit_min_new: 500   # … once this many chunks were placed since its fit
-    sample_max: 20000    # vectors a fit samples (also capped at 64 MB)
+    sample_max: 20000    # vectors a PCA fit samples (also capped at 64 MB)
+    method: pca          # pca (default) | umap
+    umap_sample_max: 10000  # chunks a UMAP fit lays out; the rest are placed among them
 ```
+
+- **PCA or UMAP.** PCA (the default) is an exact basis, so a new chunk is placed
+  without a refit. UMAP keeps neighbourhoods: on a measured corpus, 83% of a
+  chunk's map neighbours came from its own document, against 14% with PCA. It is
+  fitted on a sample (seconds of CPU on a large scope), places the rest by
+  nearest neighbours, and aligns each refit to the previous map. Changing
+  `method` refits each scope on its next pass; the operator route's `method=`
+  fits one scope the other way to compare. Concurrent refits of one scope
+  resolve to one basis (the loser reports `raced: true`).
 
 - **`LOOMCYCLE_DOCUMENT_PROJECTION_INTERVAL`** (a Go duration) overrides
   `interval`, and a positive value also turns the projection on.
@@ -325,6 +373,25 @@ memory:
   (default `true`), `refit=true` forces a new basis, `limit` (default 5000);
   call again while `more` is true. `unsupported: true` = no vector index; 409
   while `memory.projection` is off. Operator-admin.
+
+### Live updates — the reader document feed (v1.135.0)
+
+`GET /v1/_document/feed?scope=user|tenant` streams (SSE) a frame whenever a
+document the caller can list changes in that scope: `document.chunk.updated`,
+`document.chunk.deleted`, `document.edges.changed`. Retitles, moves, reorders
+and `set_path` count as updates. Frames carry ids, never values, and there is no
+cursor: a reconnect is a resync. A tenant member may open it, unlike the
+operator's `GET /v1/_document/changes`. `scope: agent` is refused.
+- Needs `LOOMCYCLE_MEMORY_CHANGES_ENABLED`; without it the first frame says
+  `enabled: false` and the stream idles.
+- At most `LOOMCYCLE_DOCUMENT_FEED_MAX_STREAMS` (default 4) per principal.
+  Credentials are re-checked every 30 s.
+- HTTP only (TS `client.documentFeed`). There is no MCP twin: Claude Code
+  cannot hold a stream.
+
+The universe view uses it to redraw exactly the changed documents. Its **saved
+views** (mode, filters, camera, selection) are stored as `type=view` documents,
+so they are listed, named and permissioned like any document.
 
 ---
 
@@ -817,7 +884,8 @@ docInput.seed_ids of type []string`). That is a stale cache, not a runtime bug �
 - **Unix nanoseconds here, RFC3339 on `memory`.** `valid_at`, `invalid_at`,
   `observed_at` and `as_of` are integers on this tool.
 - **`set_path` adds a name; it is not a move.** To rename, use `path` `op=mv`.
-- **There is no `move_documents` yet** — copy, check, then `delete_document`.
+- **`move_documents` keeps ids; `copy_documents` mints new ones.** Neither
+  works within one scope as a rename: that is `path` `op=mv`.
 - **Memory SQL refuses Document tables** since v1.128.0
   (`document_tables_reserved`) — use `query_chunks`.
 

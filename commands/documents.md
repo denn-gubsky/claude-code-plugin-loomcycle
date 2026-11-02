@@ -1,6 +1,6 @@
 ---
-description: Work on whole sets of loomcycle documents — copy them between scopes with their relations, take a scope-wide snapshot of a corpus, or classify a document against the tenant ontology.
-argument-hint: "copy <to_scope> (--under=<path>… | --ids=a,b) [--scope=user|agent|tenant] [--map=/from:/to,…] [--confirm] | snapshot [--scope=…] [--under=<path>] [--proposed] [--projection] | classify <document_id|path> [--scope=…] [--propose]"
+description: Work on whole sets of loomcycle documents — copy or move them between scopes with their relations, take a scope-wide snapshot of a corpus, or classify a document against the tenant ontology.
+argument-hint: "copy|move <to_scope> (--under=<path>… | --ids=a,b) [--scope=user|agent|tenant] [--map=/from:/to,…] [--drop-dangling] [--confirm] | snapshot [--scope=…] [--under=<path>] [--proposed] [--projection] | classify <document_id|path> [--scope=…] [--propose]"
 allowed-tools: mcp__loomcycle__document mcp__plugin_loomcycle_loomcycle__document
 ---
 
@@ -75,17 +75,66 @@ Each copy is announced on the target scope's `documents/ingested` queue (reason
 `copied`), so a deployment running the knowledge-base links agent will process
 them.
 
-### There is no move yet
+### Copy or move?
 
-`move_documents` (keep the ids, remove the source) is planned but **not in the
-runtime**. To move documents today:
-1. `copy` and check the result: nothing refused that you needed, and the
-   dangling relations accepted;
-2. delete each source with `document` `op=delete_document`, **only after the
-   user confirms**.
+`copy` mints **new ids** and leaves the source alone. If the documents should
+*live* in the other scope, and anything holds their ids (notes, memory,
+statements, links), use `move` instead.
 
-The copies have **new ids**, so anything that stored an old id (a note, an
-agent's memory, an external link) must be updated. Say so before deleting.
+---
+
+## `move` — move documents into another scope, keeping their ids
+
+```json
+{ "op": "move_documents", "scope": "<from>", "to_scope": "<to>",
+  "under_path": "/loomcycle", "path_map": {"/loomcycle": "/kb/loomcycle"},
+  "dangling": "refuse", "dry_run": true }
+```
+
+`move_documents` shipped on loomcycle main after v1.135.0. On a runtime that
+lacks it the op is refused as unknown. Then fall back to `copy`, check the
+result, and delete each source with `document` `op=delete_document`, after the
+user confirms and knowing the ids change.
+
+- Same selection flags as `copy` (at most 500). `<to_scope>` **must differ**
+  from `--scope`; to rename within one scope use the `path` tool's `mv`.
+- Every id is kept: documents, chunks, and the relations between moved
+  documents with their statuses, rulings and evidence. The source scope no
+  longer holds them.
+- **A relation cannot span two scopes.** If a moved document has a relation to
+  one outside the set, the dry run reports `blocked_by: "dangling_relations"`
+  and lists them under `dangling`. Offer two ways out: widen the set to include
+  the other documents (preferred), or `--drop-dangling` (`dangling: "drop"`),
+  which deletes those relations with the source. Never pick `drop` for the user.
+
+**Always two calls.** First the dry run. Render:
+- counts and the document table, as for `copy`;
+- `refused`: the copy codes, plus `id_collision` (the target already holds that
+  id). A move also needs **write** on each source, so `forbidden` can appear
+  where a copy would pass;
+- `dangling` and `blocked_by`;
+- `to_finish`: documents an earlier, interrupted move already took out of the
+  source.
+
+Then, only with `--confirm` (or the user's yes after seeing it):
+
+```json
+{ "op": "move_documents", …same…, "dry_run": false,
+  "expect_count": <counts.documents from the dry run> }
+```
+
+A changed set is refused (`the set now holds N documents to move, not the M
+expected`) and nothing moves. Run the dry run again.
+
+**After the move**, render `moved`, `dropped` if any, and **`unfinished`**:
+documents written to the target but not finished, each with a code
+(`verify_failed`, `source_not_removed`, `marker_not_cleared`). Their sources are
+kept. **Running the same call again resumes** the interrupted move (rows marked
+`resumed`), so tell the user to do that rather than cleaning up by hand. A scope
+held by a links-agent lease refuses until the lease ends; retry later.
+
+Each moved document is announced on the target scope's `documents/ingested`
+queue with reason `moved`.
 
 ---
 
@@ -156,5 +205,5 @@ or, with a projection, chunks placed by meaning. Point the user there to
   `/loomcycle:kb-review`), and `issued_by` asserted when the class was applied
   by rule.
 
-If the sub-command is missing or unrecognised, list the three and stop rather
+If the sub-command is missing or unrecognised, list the four and stop rather
 than guessing.

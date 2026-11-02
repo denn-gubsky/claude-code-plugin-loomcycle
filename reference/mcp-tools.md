@@ -40,7 +40,7 @@ fewer: your token's scopes and access-control rules remove tools from the list
 | Ask whether you may do something | `authz` (`op=evaluation`) |
 | Know what agents exist | `list_agents` |
 | Work the queue of proposed relations | `review` |
-| Copy documents to another scope | `document` (`op=copy_documents`) |
+| Copy or move documents to another scope | `document` (`op=copy_documents` / `op=move_documents`) |
 
 ---
 
@@ -254,8 +254,11 @@ The split is by **shape**, not by topic:
   copies up to 500 documents server-side with their history, images and the
   relations between them. `export_md` + `import_md` would mint new ids, keep only
   the current text and drop every relation. It is a dry run unless
-  `dry_run: false`. **There is no `move_documents` yet**: copy, then delete the
-  sources. See `/loomcycle:documents copy`.
+  `dry_run: false`. **`op=move_documents`** (on main after v1.135.0) moves a set
+  and keeps every id. A relation leaving the set refuses it unless
+  `dangling: "drop"`, and a real move needs the dry run's count as
+  `expect_count`. An interrupted move resumes when the same call runs again. See
+  `/loomcycle:documents copy` / `move`.
 - **A whole scope at once:** `document` `op=graph_snapshot` (v1.135.0) returns
   every document, chunk tree, relation and Path name as paged parallel columns,
   with no bodies. It feeds the Web UI's 3D universe view. See

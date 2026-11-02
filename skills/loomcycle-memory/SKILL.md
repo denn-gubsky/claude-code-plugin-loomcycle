@@ -249,8 +249,9 @@ ontology declares.
 - **Moving documents between scopes:** `document` `op=copy_documents`
   (v1.135.0) copies a set (new ids, statements between members, Path names via
   `path_map`); a dry run unless `dry_run: false`. Subject documents, documents
-  holding facts and the tenant ontology are refused. There is **no
-  `move_documents` yet**.
+  holding facts and the tenant ontology are refused. `move_documents` (after
+  v1.135.0) moves a set and **keeps every id**; a relation leaving the set
+  refuses the move unless `dangling: "drop"`.
 
 ## Documents and Path
 

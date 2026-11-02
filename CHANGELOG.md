@@ -8,7 +8,7 @@ All notable changes to this project are documented here. The format follows
 
 **Brought up to loomcycle v1.135.0: the Document tool as a knowledge base.**
 Since v1.126.0 the runtime gained two MCP tools (`ontology`, `review`, for 68),
-and the Document tool went from 47 to 63 ops. The new ops cover statements with
+and the Document tool went from 47 to 63 ops (64 with `move_documents`, on main after the v1.135.0 tag). The new ops cover statements with
 evidence, a sectioned tenant ontology, editions, classification, bulk review
 with a judge agent, subject merging, a scope-wide snapshot behind the Web UI's
 3D universe view, and copying documents between scopes. Three new commands, a
@@ -19,7 +19,10 @@ new `knowledge-base.md` reference, and `document.md` rewritten. Version bump
 
 - **`/loomcycle:documents`**:
   - `copy` (`copy_documents`: dry run first; renders the refused and dangling
-    lists; there is no move yet, so copy, check, then delete);
+    lists);
+  - `move` (`move_documents`, after v1.135.0: keeps every id; dry run, then
+    `expect_count`; a relation leaving the set blocks it unless
+    `--drop-dangling`; an interrupted move resumes on the same call);
   - `snapshot` (`graph_snapshot`, decoded into a summary by type, path and
     relation kind; reports whether the scope has a 3D map);
   - `classify` (report-only by default).
@@ -42,7 +45,8 @@ new `knowledge-base.md` reference, and `document.md` rewritten. Version bump
 
 ### Changed
 
-- **`reference/document.md`** rewritten for 63 ops. The knowledge-base topics
+- **`reference/document.md`** rewritten for 64 ops, with `move_documents`, UMAP
+  projection and the member-safe document change feed. The knowledge-base topics
   moved to the new page, with pointers. New sections: `copy_documents`,
   `graph_snapshot` and the universe view, the 3D projection
   (`memory.projection`), the Memory SQL boundary. `graph_recall`'s new arguments

@@ -240,7 +240,7 @@ Memory — the #1 "Document refused" cause). Scope `agent`/`user`/**`tenant`** (
 shared across the tenant and needs `tenant` in **both** `memory_scopes` and `sql_scopes`, since a
 document spans both planes). **Also a direct MCP meta-tool** — `document`. Since v1.135.0,
 `copy_documents` copies up to 500 documents between scopes with their relations (dry run by
-default; there is no move yet), and `graph_snapshot` exports a whole scope as paged columns for the
+default), `move_documents` (after v1.135.0) moves them keeping every id, and `graph_snapshot` exports a whole scope as paged columns for the
 Web UI's 3D universe view (`memory.projection` adds a map by meaning). Memory SQL can no longer
 touch the Document tables (`document_tables_reserved`, v1.128.0).
 **Full reference:** [reference/document.md](reference/document.md).
