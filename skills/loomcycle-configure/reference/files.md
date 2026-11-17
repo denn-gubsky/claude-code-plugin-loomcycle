@@ -1,4 +1,4 @@
-# Files reference — the run inbox and the File tool (v1.122.0+; checked against v1.135.0)
+# Files reference — the run inbox and the File tool (v1.122.0+; checked against v1.156.0)
 
 A tool call is text, so a file cannot reach a model as one: base64 is too long to hold, too easy
 to corrupt, and unreadable anyway. Since **v1.122.0**, when a tool returns a file loomcycle keeps
@@ -17,7 +17,12 @@ Version map: v1.122.0 inbox, capture, `File` tool, extraction · v1.123.0 OCR on
 `transcription` event · v1.124.0 the download/upload URL check · v1.125.0 `transcribe`, import
 provenance and `source`, the HTTP route and inbox downloads · v1.126.0 import `headings` ·
 v1.128.0 `import` reaches edition reimport · v1.128.1 heading `drop` · v1.135.0 ODT extraction,
-PDF tables, OpenDocument sniffing.
+PDF tables, OpenDocument sniffing · v1.140.0 the speech routes · v1.144.0 `infer_headings`, heading
+`level`, source `revision` / `updated_at` · v1.145.0 headings from CSS classes · v1.146.0 tighter HTML
+and Office caps · v1.147.0 one bad PDF page no longer fails the file · v1.153.0 conversion workers
+(opt-in) · v1.154.0 workers by default on Linux, `loomcycle-media` retired · v1.154.1 per-server
+`binary_results_min_bytes`, encrypted PDFs refused before reading · v1.155.0 `render` · v1.156.0 MCP
+`render` without a run, `GET /v1/_document/export/{id}`.
 
 ---
 
@@ -51,7 +56,11 @@ A bad value refuses the boot.
 | `LOOMCYCLE_FILE_MAX_BYTES` | 64 MiB | one kept or downloaded file |
 | `LOOMCYCLE_FILE_INBOX_MAX_BYTES` | 1 GiB | the tree's whole inbox (a resumed tree counts what it already holds) |
 | `LOOMCYCLE_MCP_MAX_FRAME_BYTES` | 16 MiB | one MCP response: a stdio JSON-RPC line, or an MCP HTTP body |
-| `LOOMCYCLE_FILE_BASE64_MIN_BYTES` | 4096 | the shortest base64 string a `binary_results: capture` server's text is searched for |
+| `LOOMCYCLE_EXTRACT_CONCURRENCY` | CPU count | extractions run at once in process (with conversion workers, the pool bounds extraction instead); the rest wait up to 60 s, then a busy answer |
+
+The shortest base64 string a `binary_results: capture` server's text is searched for is **per
+server** since v1.154.1: `binary_results_min_bytes` (default 4096, below). The old global
+environment variable is no longer read — set the key on the server instead.
 
 ---
 
@@ -60,7 +69,7 @@ A bad value refuses the boot.
 | Source | Captured when |
 |---|---|
 | MCP result `image`, `audio`, `resource` blob blocks | always. A `resource` with text is kept as text; a `resource_link` is shown as one line |
-| Base64 inside an MCP **text** block | only for a server with `binary_results: capture`. Strings ≥ `LOOMCYCLE_FILE_BASE64_MIN_BYTES` that decode to a recognisable file or readable text are replaced by the stub; opaque tokens are left alone and the rest of the block is byte-identical |
+| Base64 inside an MCP **text** block | only for a server with `binary_results: capture`. Strings ≥ the server's `binary_results_min_bytes` (default 4096) that decode to a recognisable file or readable text are replaced by the stub; opaque tokens are left alone and the rest of the block is byte-identical |
 | HTTP and WebFetch responses | the body is binary (by Content-Type, then a sniff, then the URL extension). The text path is unchanged |
 | WebFetch with `assets: true` | the page's images and its links to PDFs, images and Office files, under the page's own host policy and WebFetch's hooks, at most `assets_max` (default 20, ceiling 100) |
 
@@ -73,12 +82,19 @@ ODT reader. `.odt` / `.ott` are in the extension table for a package without tha
 `MCPServerDef` (create / fork); it is part of the def's content hash. Opt in only for a server that
 returns files as base64 text — a long opaque token could otherwise look like one.
 
+`binary_results_min_bytes` (v1.154.1) lowers the threshold for a server that returns **small**
+files (short text notes) as base64 inside JSON, which would otherwise reach the model as base64. It
+is at least `128` and only valid beside `binary_results: capture` (refused at load, create or fork
+otherwise); on an `MCPServerDef` set it in the overlay with `fork`. It is part of the content hash,
+and `4096` hashes as its absence.
+
 ```yaml
 mcp_servers:
   ms365:
     transport: http
     url: https://mcp.example.internal/ms365
     binary_results: capture
+    binary_results_min_bytes: 256   # default 4096
 ```
 
 **Names.** Only the last segment of the producer's name, %-unescaped, Cyrillic transliterated
@@ -113,9 +129,10 @@ for the default volume, or a bare path (= the inbox).
 | `clear` | empty the inbox, or one folder of it | `prefix` | — |
 | `download` | GET a URL into the inbox (or a volume) | `url`, `to`, `overwrite`, `headers`, `max_bytes` | `HTTP`; plus `Write` into a volume |
 | `upload` | PUT/POST a file to a URL, whole or ranged for an upload session | `from`, `url`, `method`, `content_type`, `headers`, `ranged`, `chunk_bytes` | `HTTP`; plus `Read` from a volume |
-| `extract` | DOCX / ODT / XLSX / PPTX / PDF / HTML / CSV / TSV / text / captions / image → Markdown in `extracted/`, pictures kept as files, plus a fenced excerpt; a recording is handed to `transcribe` | `path`, `images`, `max_rows`, `excerpt_chars`, `ocr`, `language`, `dry_run` | `Read` for a non-inbox source |
+| `extract` | DOCX / ODT / XLSX / PPTX / PDF / HTML / CSV / TSV / text / captions / image → Markdown in `extracted/`, pictures kept as files, plus a fenced excerpt; a recording is handed to `transcribe` | `path`, `images`, `max_rows`, `excerpt_chars`, `ocr`, `language`, `dry_run`, `structure` | `Read` for a non-inbox source |
 | `transcribe` | audio / video → timed Markdown transcript in `extracted/` via the speech-to-text engine | `path`, `language`, `vocabulary`, `diarize`, `timestamps`, `to`, `dry_run` | `Read` for a non-inbox source |
 | `import` | build a Document from such Markdown, `extract`'s pictures attached as image chunks; or reconcile a new edition onto a held work | `path`, `title`, `doc_path`, `scope`, `tags`, `source`, `headings`; `reimport`, `work_key`, `edition_date`, `amending_document_id` | `Document` and its scope grants |
+| `render` (v1.155.0) | the reverse of `import`: a Document (or a Markdown file) written as `pdf`, `docx`, `html` or `md` into `rendered/` or a volume — see [Rendering](#rendering-a-document-as-a-file-render) | `document` \| `doc_path` \| `path`, `format`, `to`, `chunk`, `toc`, `title_page`, `page_size`, `language`, `provenance`, `scope` | `Document` (read is enough); `Write` into a volume |
 
 The inbox itself needs only `File`. Any other volume is reached with the run's own grants, and that
 tool's pre-hooks judge the call on the final path. `download` / `upload` go out under the HTTP
@@ -144,9 +161,10 @@ Do not use `File` to read a file's text — Read the `.md` that `extract` wrote.
 
 ## Extraction (`extract`)
 
-Pure Go, in process. The excerpt returned is at most 30 000 characters, fenced as untrusted
-(`<file_content …>`) so the text cannot close its own fence; document text is escaped so it cannot
-become Markdown structure. Extraction times out after 60 s.
+Pure Go — in a **conversion worker** where the server has them (the default on Linux since
+v1.154.0, below), otherwise in the runtime's own process. The excerpt returned is at most 30 000
+characters, fenced as untrusted (`<file_content …>`) so the text cannot close its own fence; document
+text is escaped so it cannot become Markdown structure. Extraction times out after 60 s.
 
 | Type | Output |
 |---|---|
@@ -166,10 +184,33 @@ Pictures land at `volume:inbox:extracted/<name>/img-<n>.<ext>` and remember the 
 were on. `images: false` writes only their descriptions.
 
 **Limits and refusals.** Zip formats go through one bounded reader (entry count, total size,
-per-entry ratio, no entry name used as a path); XML is parsed strictly with no DTD entities. PDF:
-2000 pages, 200 000 characters and 32 MiB of decoded content per page; **every encrypted PDF is
-refused**, even one that opens without a password. Old binary `.doc` and archives cannot be
-extracted.
+per-entry ratio, no entry name used as a path); XML is parsed strictly with no DTD entities, with
+attribute and element caps (v1.146.0). An HTML page over **8 MiB** is refused (v1.146.0; it was 32
+MiB), as are HTML and Office parts past the element, attribute and formatting caps. Tables stop at
+16 MiB / 200 000 cells per table and 32 MiB for all of a document's tables. PDF: 2000 pages,
+200 000 characters and 32 MiB of decoded content per page.
+
+- **Encrypted PDFs are refused** — every one, even one that opens without a password. Since
+  v1.154.1 the check reads only the first and last 64 KiB, so an encrypted file is refused **before**
+  it is parsed (a 22 MB encrypted PDF used to take 390 MiB doing so).
+- **One bad page no longer fails the file** (v1.147.0): a page whose page box is malformed is
+  listed as unread and the rest extracts.
+- Old binary `.doc` and archives cannot be extracted.
+
+**Headings marked only by formatting** (v1.144.0, CSS classes v1.145.0). Many documents mark section
+titles with bold, larger or coloured text instead of a heading style, so they extract as one flat
+section. `structure: {infer_headings: true}` (DOCX and HTML; off by default, and off the output is
+unchanged) makes a heading of each line of at most 120 characters, not ending in `.` `,` `;`, not in
+a list or table, that is wholly bold, or at least 1.15× the body's size, or coloured differently and
+also bold or larger. HTML class rules count too (v1.145.0), and in a body that is mostly bold, bold
+alone no longer marks a heading. Real headings keep their level; inferred ones are levelled by size
+below the shallowest real heading. The pass also drops a picture repeated three or more times
+(decoration). The result reports `inferred_headings` and `dropped_decorative_images`; importing the
+extract records `provenance.structured.by: "extract:infer_headings"`.
+
+```json
+{"op": "extract", "path": "volume:inbox:documents/policy.docx", "structure": {"infer_headings": true}}
+```
 
 **PDF tables (v1.135.0).** A table the page **draws with borders** (lines joining into a grid of at
 least 2×2 cells; a missing inner border merges cells) becomes a Markdown table in reading order. A
@@ -259,7 +300,9 @@ transcription:
   overlap. With `media.command` (ffmpeg) every other format is converted to WAV first. Without it, a
   file goes whole only if the engine reads its format, it is under 25 MB and within
   `max_minutes_per_call`; otherwise it is refused naming `transcription.stt.media.command` — never
-  truncated. The `loomcycle-media` image carries ffmpeg and poppler-utils.
+  truncated. Where the conversion runs is [Conversion workers](#conversion-workers-v11530); in a
+container, ffmpeg and poppler live in the **`loomcycle-worker`** image (v1.154.0+; the runtime
+images are distroless and `loomcycle-media` is no longer published).
 - **Output.** `# <file>`, a `<!-- loom: stt … -->` line, a `## [hh:mm:ss – hh:mm:ss]` section per
   piece, passages with start times, `**Speaker N**` labels where the model separates speakers.
   `timestamps: none` drops the times.
@@ -270,6 +313,73 @@ transcription:
 `purpose` (`ocr` | `stt`), engine, provider, model, `pages` or `seconds`, tokens, `cost` (absent when
 unpriced), `status` (`ok` | `partial` | `failed`), `dry_run`, `error`, `run_id` — never the text. It
 is an operator record, not model input.
+
+### The speech routes (v1.140.0)
+
+The same engines also serve chat clients outside any run: `POST /v1/audio/speech` (`{input, model?,
+voice?, response_format?, language?}` → the audio, whole) and `POST /v1/audio/transcriptions`
+(multipart upload → `json`, `verbose_json` or `text`), with `GET /v1/_speech` listing languages,
+voices and formats. They need `runs:create` (an isolated user may call them); a token limited to
+certain agents needs the matching `surfaces` grant (v1.141.0). Access control asks
+`use gateway:speech` / `use gateway:transcription`; each request is billed to the caller, and
+`LOOMCYCLE_AUDIO_MAX_INFLIGHT` (default 2) sizes both routes' engine queues. Not over MCP.
+
+---
+
+## Conversion workers (v1.153.0+)
+
+Everything that parses a file — `extract`, OCR page cuts and rendering, a recording's conversion for
+speech-to-text (in a run and on `/v1/audio/transcriptions`), speech encoding, image re-encoding for a
+vision model, and `render` — can run in **conversion workers**: copies of the same binary
+(`loomcycle worker`) that get a file's bytes and return bytes. A worker holds no provider key, no
+store connection, no path and no tenant; the runtime keeps every grant, fence, inbox write and model
+call. A hostile or oversized file then kills **one worker and one tool call**, not the replica.
+
+```yaml
+conversion:
+  mode: local              # local | inprocess | remote | local+remote
+  queue_wait_s: 60         # wait for a free worker, then a busy answer the model may retry
+  quarantine_ttl_s: 3600   # a file that killed a worker is refused this long
+  local:
+    workers: 2             # children kept running (1–64)
+    memory_limit_mb: 1024  # each child's memory limit (≥ 128)
+```
+
+| Mode | Where conversions run |
+|---|---|
+| `local` | **the default on Linux** with no `conversion.mode` (since v1.154.0): children of the runtime, started, restarted (1 s → 30 s back-off) and killed before the runtime by the kernel's OOM choice |
+| `inprocess` | the default on every other platform; write it on Linux to keep the old behaviour |
+| `remote` | workers you run as their own containers from the **`loomcycle-worker`** image, attaching to `conversion.listen` |
+| `local+remote` | both, in one pool |
+
+- **When the default cannot start its children** (no writable temp directory for the socket) the
+  runtime warns and converts in process; a mode **written** in the config that cannot start stops
+  the boot.
+- **A file that kills a worker** fails that one call ("crashed the file converter") and is refused
+  for `quarantine_ttl_s` instead of going to the next worker. With every worker busy a call waits
+  `queue_wait_s`; with none attached it is refused. A configured pool never falls back to the
+  runtime's process.
+- **Helper programs must be where the workers run.** In `local` mode the children get the runtime's
+  own helper commands (`transcription.ocr.rasterize.command`, `transcription.stt.media.command`,
+  `speech.encode.command`); in a distroless runtime image there is no ffmpeg or pdftoppm, so voice
+  conversion, speech encoding and OCR page rendering fail with "the program is not installed where
+  the workers run" — use `remote` workers. A remote worker runs **its own** commands
+  (`LOOMCYCLE_WORKER_MEDIA_COMMAND`, `…_RASTERIZE_COMMAND`, `…_ENCODE_COMMAND`, `…_WRITE_COMMAND`;
+  the image sets defaults); the runtime's setting only decides whether the conversion is wanted, so
+  set both.
+- **Remote endpoint.** `conversion.listen: 0.0.0.0:7788` (never the API port) needs
+  `LOOMCYCLE_WORKER_TOKEN` of at least 32 characters on the runtime and every worker
+  (`openssl rand -hex 32`; a secret — the env file, never yaml), and, off the loopback, TLS
+  (`conversion.tls.cert_file` / `key_file`, optional `client_ca_file` for mutual TLS) **unless**
+  `conversion.insecure: true` on a network only the runtime and its workers share (workers then set
+  `LOOMCYCLE_WORKER_INSECURE=1`). Never publish the port.
+- **The image.** `denngubsky/loomcycle-worker:<release>` carries ffmpeg, poppler and Typst with the
+  Noto fonts; run it with a memory limit, read-only, a tmpfs `/scratch`, and
+  `LOOMCYCLE_WORKER_DISPATCHER=<runtime>:7788` (a comma list, or `dns:///name:port` for every replica).
+  Upgrade runtime and workers together.
+- **`loomcycle-media` is gone** (last tag 1.153.0): move the runtime to `loomcycle-browser` (or
+  `loomcycle`) and run `loomcycle-worker` containers in `remote` mode.
+- `/metrics` reports the pool as `loomcycle_conversion_*` (see [observability.md](observability.md)).
 
 ---
 
@@ -292,8 +402,10 @@ the chosen `scope` (`agent`, `user` default, `tenant`), and SQL Memory enabled �
   `sources=documents`, never returned as facts.
 - **A changed file loses its record.** An inbox file edited since capture records none of the
   above, gets no `source/…` tag, and the result carries `provenance_note`.
-- **`source: {url, kind, title}`** links back to where the file lives. `kind`: `sharepoint`,
-  `email`, `attachment`, `web`, `other` (default); adds a `source/<kind>` tag. `url` is http(s),
+- **`source: {url, kind, title, revision, updated_at}`** links back to where the file lives.
+  `kind`: `sharepoint`, `email`, `attachment`, `web`, `skybits` (v1.144.0), `other` (default); adds a
+  `source/<kind>` tag. `revision` (≤ 64 chars, the source's own version name) and `updated_at`
+  (RFC 3339) record which version of the source this is (v1.144.0). `url` is http(s),
   ≤ 2 KiB, no user info; signed query parameters are masked. Pass the item's web link (SharePoint
   `webUrl`, a message's `webLink`), **never a download or upload link**.
 - **`headings` (v1.126.0)** structures a file whose sections show only by numbering (a PDF export),
@@ -307,6 +419,9 @@ the chosen `scope` (`agent`, `user` default, `tenant`), and SQL Memory enabled �
     extract's `## Page N` headings so a section running over a page break is not split. A drop
     takes no `level`, `title` or `lines`; drops and additions mix in one call, line numbers
     counting over the file as it is. (A drop does not track code fences.)
+  - `{line, level, as: "level"}` (v1.144.0) — re-levels a line that is **already** a heading: only
+    its `#` run changes. A `heading` entry on an existing heading is now refused (it used to write
+    `### ## Title`); use `level`. Counted as `provenance.structured.relevelled`.
   - Levels 2–6, increasing line order, ≤ 10 000 entries; one bad entry (a drop of a body line
     included) refuses the whole import. `provenance.structured: {headings, dropped, by}` records
     the counts and the run (`dropped` left out when 0).
@@ -314,7 +429,11 @@ the chosen `scope` (`agent`, `user` default, `tenant`), and SQL Memory enabled �
   `edition_date` in unix nanoseconds, `amending_document_id`) reconciles the file onto the document
   holding that key part by part, as Document `import_md` with `reimport` does — unchanged and moved
   parts keep their ids and links, changed parts are superseded, removed parts close, nothing is
-  deleted; no holder yet imports it as the first edition. Pictures are not attached to changed
+  deleted; no holder yet imports it as the first edition. A re-import **refreshes the provenance**
+  (file, hash, `revision`, `updated_at`; the kind may change, e.g. `other` → `skybits`), keeping the
+  earlier one in `history`. A `source.url` other than the stored one is refused with
+  `source_mismatch` before anything is written, and a download link is never read as the source
+  (v1.144.0). Pictures are not attached to changed
   parts; `doc_path` and `source` apply only to a first edition. The result carries `import_md`'s
   `reimport` report and `changed_chunk_ids` instead of chunk counts. See
   [knowledge-base.md](knowledge-base.md) for editions and statements.
@@ -338,6 +457,56 @@ A PDF extract imported by sections, not pages — drop the page headings, add th
    {"line": 9, "as": "drop"}, {"line": 13, "level": 2, "as": "heading"}
  ]}
 ```
+
+---
+
+## Rendering a Document as a file (`render`)
+
+`File op=render` (v1.155.0) is the reverse of `import`: a Document the run may read — by `document`
+id or `doc_path`, optionally one subtree (`chunk`) — or a Markdown file (`path`), written as a file
+people open, send and print. The file goes to `volume:inbox:rendered/<title>.<format>`, or with `to`
+into a read-write volume; the model gets `{ref, format, size, sha256, render_id, reused, report}`,
+never the bytes. `keep`, `upload` and the chat bridges take the file on.
+
+```json
+{"op": "render", "doc_path": "/board/regulations/nbu-064", "format": "pdf", "toc": true}
+```
+
+| `format` | Written by | Holds |
+|---|---|---|
+| `md` | pure Go | clean Markdown, pictures as files beside it |
+| `html` | pure Go | one self-contained page: pictures as data URLs, a strict CSP, no script |
+| `docx` | pure Go | Word's own heading styles, lists, tables, pictures, links; no fields, macros or external parts |
+| `pdf` | **Typst**, a helper program | page numbers; `toc` adds an outline |
+
+- **Options:** `toc`, `title_page` (none by default), `page_size` (`a4` or `letter`), `language`,
+  `provenance` (default true), `scope`. Noto Sans / Noto Sans Mono; a Draft or Review label beside
+  the title when the root's status says so. A link inside the same document stays internal; a link
+  to another document becomes its Web UI address when `LOOMCYCLE_PUBLIC_URL` is set and the caller
+  may read it, plain text otherwise. Nothing in a body becomes markup, script or a field.
+- **Same gates as an export.** It is an `export_md` read inside: read mode, scope grants and access
+  control apply. Needs `Document` (read is enough) and, into a volume, `Write`.
+- **PDF needs Typst where the conversion runs.** The `loomcycle-worker` image carries it (a worker
+  built before v1.155.0 never takes a PDF job); in process or in `local` mode `typst` must be on the
+  runtime's `PATH`. Without it a PDF render answers that the server cannot write PDF — the other
+  formats still work.
+- **Limits:** 20 000 sections, 32 MiB of text, 2 000 pictures (≤ 8 MiB each, 192 MiB together); the
+  file ≤ 64 MiB, a PDF ≤ 2 000 pages; 2 minutes a render, 5 for a PDF. Past a limit, render a part
+  with `chunk`.
+- **The render log.** Every render is a row in the document's scope (what it was made of, format,
+  options, the output's hash and size, where it went, who rendered it — never content).
+  `get_document` shows the newest render per format; Document `history` with
+  `include: ["renders"]` lists them. An unchanged earlier output still in its volume is reused
+  (`reused: true`).
+
+**Downloading without a run (v1.156.0).** The Web UI document toolbar has a **download** menu (PDF,
+Word, HTML, Markdown, Canvas), and `GET /v1/_document/export/{document_id}?format=pdf|docx|html|md`
+returns the file as an attachment named after the title (Markdown with pictures is a zip), with
+`scope`, `chunk`, `toc`, `title_page`, `page_size`, `language`, `provenance` and the browse parameters
+`scope_id` / `tenant`. A document missing or unreadable to the caller is the same 404; errors are 400,
+404, 413 `too_large`, 422 `tool_refused`, 503 `unavailable` or `busy`. Every download is audited
+(`document_exported`) and logged with destination `download`; the file is not served when the audit
+record cannot be written.
 
 ---
 
@@ -370,8 +539,10 @@ agents:
       max_minutes_per_run: 60
 ```
 
-With `LOOMCYCLE_SQLMEM_ENABLED=1` for Document. `download` / `upload` reach only hosts in the run's
-`allowed_hosts`.
+Document needs SQL Memory, which is on by itself since v1.153.0 with a SQLite store (and with
+Postgres when `LOOMCYCLE_SQLMEM_PG_DSN` is set; `storage.sqlmem_enabled: false` turns it off). The
+old enable switch is no longer read — see [settings.md](settings.md). `download` / `upload` reach
+only hosts in the run's `allowed_hosts`.
 
 ---
 
@@ -379,7 +550,8 @@ With `LOOMCYCLE_SQLMEM_ENABLED=1` for Document. `download` / `upload` reach only
 
 An operator session has no inbox of its own, so `file` acts on the inbox of a run it may read,
 named by `run_id` (as `get_run` / `list_runs` report it; a sub-run's id reaches its tree's inbox).
-It runs the same `File` tool, on that inbox only. Needs **`runs:read`** (like `get_run`) and is
+It runs the same `File` tool, on that inbox only. Since v1.156.0 the schema requires only `op`:
+`render` takes **no** `run_id`, every other op still refuses a call without one. Needs **`runs:read`** (like `get_run`) and is
 tenant-confined: another tenant's run, or one the caller may not read, answers as missing. Input is
 strict — an unknown or repeated field is refused. Its `extract` reads the same formats as the
 in-run tool; since v1.135.0 the tool description lists them all (DOCX, ODT, XLSX, PPTX, PDF, HTML,
@@ -391,7 +563,14 @@ CSV, text, image) — PDF was missing from it before, though extract always read
 | `import` | the same; the Document goes into the **caller's** own scopes |
 | `extract`, `rm`, `clear` | the run's owner, an admin, or a tenant operator (`substrate:tenant`) of the run's tenant |
 | `keep` | the owner (**not an isolated user**), an admin or a tenant operator of the run's tenant — into a read-write **dynamic** volume of the caller's tenant (`volumedef list` shows them) that the caller's access rules let it write |
+| `render` (v1.156.0) | anyone, **without** `run_id`: a document of the caller's own scopes (`document` or `doc_path`; a member is refused an agent's scope), written to `to` — **required** — a read-write dynamic volume of the caller's tenant under `keep`'s rules (not an isolated user) |
 | `download`, `upload`, `transcribe` | not offered — download/upload need a run's HTTP host policy; give the agent `File` + `HTTP` instead |
+
+```
+file { "op": "render", "doc_path": "/board/regulations/nbu-064", "format": "docx", "to": "volume:exports:nbu-064.docx" }
+```
+
+To hand a person the file itself, `GET /v1/_document/export/{id}?format=…` (above) is simpler.
 
 **The inbox is gone once the run ends** (it dies with the tree): `keep` or download a file while the
 run is still going. An isolated user is refused `keep` because a dynamic volume is shared by the
@@ -423,11 +602,23 @@ has `runFile` and `downloadRunInboxFile`.
 | `extract` returns near-empty pages | A scan. Enable OCR (`transcription.ocr` + agent `transcription.ocr: auto`) and pass `ocr: auto` |
 | `extract` refuses `ocr: always` | The call asked above the agent's setting (its ceiling) |
 | `extract` refuses a PDF with OCR on an Ollama model | Set `transcription.ocr.rasterize.command` |
-| `extract` refuses an encrypted PDF | Every encrypted PDF is refused; decrypt upstream |
+| `extract` refuses an encrypted PDF | Every encrypted PDF is refused (since v1.154.1 before it is parsed); decrypt upstream |
+| `extract` refuses an HTML page that used to work | Over 8 MiB, or past the element / attribute caps (v1.146.0) |
+| A DOCX / HTML extracts as one flat section | Its headings are only bold or large text. Pass `structure: {infer_headings: true}` |
+| `import` refuses a `heading` entry | The line is already a heading (v1.144.0+); use `{line, level, as: "level"}` |
+| A re-import refused with `source_mismatch` | `source.url` differs from the stored one; omit it to keep the stored URL |
+| A small base64 file from an MCP server reaches the model as text | Under 4096 characters. Set `binary_results_min_bytes` (≥ 128) on that server (v1.154.1+); the old global variable is not read |
+| A conversion fails "the program is not installed where the workers run" | Conversion runs in workers (Linux default since v1.154.0) and the helper is missing there — distroless runtime image. Run `loomcycle-worker` containers (`conversion.mode: remote`), or set `conversion.mode: inprocess` on an image that has the helpers |
+| A file fails "crashed the file converter", then is refused | It killed a worker; it is quarantined for `quarantine_ttl_s` (1 h). Raise `conversion.local.memory_limit_mb` (or the container's limit) if the file is legitimate |
+| Conversions answer busy | Every worker is occupied past `queue_wait_s`; add workers (`conversion.local.workers`, or more containers) |
+| Runtime refuses to start with `conversion.mode: remote` | `LOOMCYCLE_WORKER_TOKEN` missing or under 32 characters, or a non-loopback `listen` without `tls` or `insecure: true` |
+| `render format: pdf` answers the server cannot write PDF | No Typst where conversion runs: a `loomcycle-worker` from v1.155.0+, or `typst` on the runtime's `PATH` in process / `local` mode |
+| `render` refused over MCP | Missing `to` (required without a run), an isolated user, or a member naming an agent's scope |
+| `/v1/_document/export/{id}` returns 503 | No typesetter / no worker (`unavailable`), or the pool is full (`busy`, retry after `Retry-After`); or the audit record could not be written |
 | `transcribe` refused naming `media.command` | The file cannot go whole (format, > 25 MB, or too long). Set `transcription.stt.media.command` (ffmpeg) |
 | `import` result has `provenance_note`, no `source/…` tag | The inbox file was changed after capture. Use `headings` instead of rewriting the file |
 | A PDF table still reads as run-on lines | Borderless with only two columns (read as text on purpose), or the page passed a work bound (`notes` says so). Re-export with borders, or as ODT/DOCX |
 | `extract` says no extractor reads an attachment | Pre-v1.135.0 for ODT; on v1.135.0+ check the package's mimetype entry is ODF text and it is not encrypted |
 | A section of an imported PDF is split at a page break | Drop the `## Page N` heading with `{"line": N, "as": "drop"}` (v1.128.1+) |
 | MCP `file` says the inbox is gone | The run ended. Keep or download files while it runs |
-| MCP `file` call rejected with a type error after upgrading | Claude Code caches tool schemas at connection — reload the plugin |
+| MCP `file` call rejected with a type error after upgrading | Claude Code caches tool schemas at connection — reload the plugin (an old cached schema also still demands `run_id` for `render`) |

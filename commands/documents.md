@@ -1,7 +1,7 @@
 ---
-description: Work on whole sets of loomcycle documents — copy or move them between scopes with their relations, take a scope-wide snapshot of a corpus, or classify a document against the tenant ontology.
-argument-hint: "copy|move <to_scope> (--under=<path>… | --ids=a,b) [--scope=user|agent|tenant] [--map=/from:/to,…] [--drop-dangling] [--confirm] | snapshot [--scope=…] [--under=<path>] [--proposed] [--projection] | classify <document_id|path> [--scope=…] [--propose]"
-allowed-tools: mcp__loomcycle__document mcp__plugin_loomcycle_loomcycle__document
+description: Work on whole sets of loomcycle documents — copy or move them between scopes with their relations, find duplicate copies, take a scope-wide snapshot of a corpus, classify a document against the tenant ontology, or render one to a PDF, Word, HTML or Markdown file.
+argument-hint: "copy|move <to_scope> (--under=<path>… | --ids=a,b) [--scope=user|agent|tenant] [--map=/from:/to,…] [--drop-dangling] [--confirm] | snapshot [--scope=…] [--under=<path>] [--proposed] [--projection] | classify <document_id|path> [--scope=…] [--propose] | duplicates (--under=<path>… | --ids=a,b) [--basis=sha256,title] [--propose] | render <document_id|path> --format=pdf|docx|html|md --to=volume:<name>:<path>"
+allowed-tools: mcp__loomcycle__document mcp__plugin_loomcycle_loomcycle__document mcp__loomcycle__file mcp__plugin_loomcycle_loomcycle__file
 ---
 
 # loomcycle documents
@@ -91,10 +91,12 @@ statements, links), use `move` instead.
   "dangling": "refuse", "dry_run": true }
 ```
 
-`move_documents` shipped on loomcycle main after v1.135.0. On a runtime that
-lacks it the op is refused as unknown. Then fall back to `copy`, check the
-result, and delete each source with `document` `op=delete_document`, after the
-user confirms and knowing the ids change.
+`move_documents` needs loomcycle v1.136.0+. On an older runtime the op is
+refused as unknown. Then fall back to `copy`, check the result, and delete each
+source with `document` `op=delete_document`, after the user confirms and
+knowing the ids change. Since v1.140.0 a move asks `write` and `delete` of each
+source (and `link` before dropping a relation). A relation into a document you
+cannot read blocks the move without being listed.
 
 - Same selection flags as `copy` (at most 500). `<to_scope>` **must differ**
   from `--scope`; to rename within one scope use the `path` tool's `mv`.
@@ -205,5 +207,45 @@ or, with a projection, chunks placed by meaning. Point the user there to
   `/loomcycle:kb-review`), and `issued_by` asserted when the class was applied
   by rule.
 
-If the sub-command is missing or unrecognised, list the four and stop rather
+## `duplicates` — which documents are copies of others (v1.143.0+)
+
+```json
+{ "op": "find_duplicates", "scope": "<scope>", "under_path": "/inbox",
+  "basis": ["sha256", "title"], "propose": false }
+```
+
+No model is involved. Two documents match by **`sha256`** (the same text, with
+whitespace normalised; confidence 1.0) or by **`title`** (the same title once
+copy markers such as `Copy of …` or ` (1)` are set aside, and the same kind of
+document; confidence 0.7). Each copy points at one original: the one without a
+copy marker, otherwise the earlier one.
+
+- Select with `--under=<path>` (repeatable) and/or `--ids=a,b`; at most 5000
+  documents.
+- **Default to a report** (`propose: false`). Render a table: copy title →
+  original title, basis, confidence. Show `counts`, and `truncated` when the
+  pair list (at most 1000) was cut.
+- `--propose` files each pair as a `duplicate_of` **proposal** for review, with
+  both titles as evidence. Nothing is merged, hidden or deleted. Review them
+  with `/loomcycle:kb-review accept|reject --kind=duplicate_of`. Pairs already
+  joined by a `duplicate_of` statement are skipped, and a rejected one stays
+  rejected.
+
+## `render` — a document as a file (v1.156.0+)
+
+Calls the `file` tool's `render` op, which needs no run:
+
+```json
+{ "op": "render", "document": "<id>", "format": "pdf",
+  "to": "volume:<name>:<path>", "scope": "<scope>" }
+```
+
+Use `doc_path` instead of `document` for a Path name. `to` must be a read-write
+dynamic volume of your tenant. The options (`chunk`, `toc`, `title_page`,
+`page_size`, `provenance`, `language`, `overwrite`) and how to read the result
+are in `/loomcycle:files render`. Report what the render left out
+(`images_skipped`, `bodies_cut`), and offer `docx` when `pdf` is refused for
+want of a typesetter.
+
+If the sub-command is missing or unrecognised, list the six and stop rather
 than guessing.

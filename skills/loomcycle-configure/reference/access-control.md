@@ -1,4 +1,4 @@
-# Access control reference (v1.122.0+; checked against v1.135.0)
+# Access control reference (v1.122.0+; checked against v1.156.0)
 
 A token's scopes name **kinds** of thing (`runs:create`, `substrate:tenant`), never
 instances, and never deny. Access control adds authority **per user and per group**:
@@ -11,6 +11,50 @@ The rules are asked at every HTTP, gRPC and MCP gate, and **intersected with an
 agent's own grants inside a run**. Nothing changes until an operator writes or
 declares a list, or switches the rollout mode: `LOOMCYCLE_ACL` defaults to
 `compat`, where the scope gates decide exactly as before.
+
+**Since v1.140.0 every stored rule is either enforced or refused.** A rule that
+names something no surface evaluates is refused when it is written
+(`400 rule_not_enforceable`) instead of being stored and deciding nothing; the
+table of what is asked where lives in the runtime (`internal/authz/enforced.go`),
+held to the code by tests. Ask `acldef op=catalog` for what may be written.
+
+---
+
+## Who decides for the tenant — the four caller tiers (v1.140.0)
+
+Scopes say which routes a token may call; *what a call may decide for the
+tenant* depends on who calls. Every transport (HTTP, gRPC, MCP) stamps one of
+four tiers on the call (an unstamped call is the lowest, `run`, so a forgotten
+stamp fails closed):
+
+| Tier | Who | What only it may do |
+|---|---|---|
+| **operator plane** | `substrate:admin`, the legacy `LOOMCYCLE_AUTH_TOKEN`, open mode, and `substrate:tenant` in its own tenant — each calling **from outside a run** | Confirm or adopt the tenant ontology, write the review policy, define a tenant-wide type, rule on proposals in any scope of its tenant, own the reserved names (`/memory/ontology`, `/memory/entities`, `/memory/tenant_root`), name any subject with `?scope_id=`, hold the tenant's lease, grant operator-grade capabilities to an agent it authors |
+| **member** | a non-isolated tenant member (`runs:*` / `channel:*` user token) | Works in its own user scope as the operator does there. Reads and acts on **only its own** runs, sessions and user-scoped channels (v1.145.0). Proposes ontology entries instead of deciding them |
+| **isolated** | `access_mode: isolated` (`substrate:user`) | Its own user scope only; never browses another subject |
+| **run** | anything a model does inside a run, whatever token started it | Only what its agent's grants and its caller's rules allow — operator authority is never exercised from inside a run |
+
+**What `?scope_id=` a member may pass** (off-run memory, Document, Path, feed and
+asset routes): itself; a subject its rules let it **`browse`** — `browse
+memory:user` or `browse document:user` with `owner_is_self: false` — and then
+**read-only**; an agent it may run, read-only. Anything else is the same opaque
+`404` for every subject. A member's write to any scope but its own user scope is
+refused, and a memory browse grant does not read documents. A member's Path call
+with no `scope` gets `400 scope_required`. To let a reviewer read a colleague's
+scope:
+
+```json
+{"effect": "allow", "actions": ["browse"], "resources": ["memory:user", "document:user"]}
+```
+
+**A member's agents are held to a ceiling**, field by field: what its own rules
+decide (tools, volumes — asked as `mount volume:<name>` — memory, SQL and history
+scopes, user and agent crypto, decision models) up to what those rules allow;
+**operator-grade fields** (`statement_methods`, `git_remote`, every
+`*_def_scopes`, tenant and run crypto) must be unset; an agent with a shell tool
+must set `shell_credentials: []`. A member also may not activate, retire or
+delete a version of an agent or team an operator holds, nor `register_agent`
+under such a name. MCP `erasure` needs `substrate:tenant`.
 
 ---
 
@@ -35,41 +79,58 @@ A selector is `<type>:<name>`, and the name takes one of three shapes:
 |---|---|---|
 | `/`-glob | `agent:chat/*`, `agent:chat/**`, `tool:Bash`, `mcp:jobs/patch*` | `*` is one segment, `**` any depth |
 | scoped name | `memory:tenant`, `document:tenant:/kb/**`, `def:agent/chat/*`, `principal:user:support-*`, `credential:user:*` | `<scope><sep><glob>`; scope may be `*`; omitting the glob means every instance of the scope |
-| enum | `run:own`, `gateway:chat`, `history:self` | exactly one of the type's values, or `*` |
+| enum | `gateway:chat`, `history:self`, `runtime:metrics` | exactly one of the type's values, or `*` |
 
 ### The catalog (types and verbs)
 
 The catalog is closed: adding a type or verb is a code change. **`acldef op=catalog`
-is the authoritative list** for the running build — ask it before writing a rule.
-At v1.135.0:
+is the authoritative list** for the running build — it lists only the verbs some
+surface asks, and a type's `type_level_only` verbs. Ask it before writing a rule.
+At v1.156.0 the verbs that may be written are:
 
-| Type | Verbs | Selector |
+| Type | Writable verbs | Selector |
 |---|---|---|
-| `agent` | run, read, spawn, steer, cancel, review | glob |
-| `volume` | read, write, provision, mount | glob |
+| `agent` | run, spawn; **read** (type-level only) | glob |
+| `volume` | read, write, mount | glob |
 | `tool` | invoke | glob (built-in tools: `tool:Bash`, `tool:Git`) |
-| `skill` | invoke, read, author | glob |
-| `mcp` / `mcp-tool` | invoke, read / invoke | glob (`mcp-tool:<name>` = a loomcycle MCP meta-tool) |
-| `a2a` | invoke, expose, author | glob |
-| `client`, `localapi` | invoke | glob |
-| `search` | use | glob |
-| `memory` | read, write, recall, browse | `user`, `agent`, `tenant`, `global` |
+| `skill` | invoke; **read** (type-level only) | glob |
+| `mcp` / `mcp-tool` | invoke / invoke | glob (`mcp:<server>/<tool>`; `mcp-tool:<name>` = a loomcycle MCP meta-tool) |
+| `a2a` | invoke | glob |
+| `memory` | read, write, browse | `user`, `agent`, `tenant`, `global` |
 | `sqlmem` | read, write | `user`, `agent`, `tenant` |
 | `document` | read, write, delete, link, browse, propose, review | `agent`, `user`, `tenant` (then `:<path glob>`) |
 | `history` | read | enum `self`, `user`, `tenant`, `global` |
 | `channel` | publish, subscribe, ack, await, broadcast, manage | glob |
 | `def` | author, retire, read, manage | `def:<family>/<glob>`; families: agent, skill, team, mcpserver, schedule, webhook, volume, a2a, a2aserver, hook, credential, memorybackend, documentsource, acl, group, client |
-| `team` | run, read, cancel, author | glob |
+| `team` | run, read, cancel | glob |
 | `credential` | use, manage | `tenant`, `user`, `agent` |
-| `crypto` | use, manage | enum `tenant`, `user`, `agent` |
-| `model`, `tier`, `transport` | use | glob |
-| `gateway` | use | enum `chat`, `embeddings`, `decide` |
-| `evaluation` | submit, read | enum `self`, `siblings`, `descendants`, `any` |
-| `interruption` | raise, resolve | glob |
-| `run` | read, delete, steer, cancel, compact, retune, review | enum `own`, `tenant` |
-| `principal` | read, manage, mint | `user`, `group`, `token`, `scim` (`principal:scim:users`, `principal:scim:groups` — v1.127.0) |
-| `runtime` | read, manage | enum: pause, snapshot, limits, retention, erasure, usage, routing, events, config, tenants, metrics |
-| `git` | fetch, push | glob (remote host and path) |
+| `crypto` | use | enum `tenant`, `user`, `agent` |
+| `model`, `tier` | use | glob — asked wherever a model is resolved (v1.140.0, below) |
+| `transport` | use | glob |
+| `gateway` | use | enum `chat`, `embeddings`, `decide`, `speech`, `transcription` |
+| `evaluation` | **read** (type-level only) | enum `self`, `siblings`, `descendants`, `any` |
+| `run` | **read, delete, steer, cancel, compact, retune, review** (all type-level only) | enum `own`, `tenant` — but a rule must name `run:*` |
+| `principal` | read, manage, mint | `user`, `group`, `token`, `scim` (`principal:token:metrics` = a tenant's scrape tokens, v1.149.0) |
+| `runtime` | read, manage | enum: pause, snapshot, limits, retention, erasure, usage, routing, events, audit, config, tenants, metrics, telemetry |
+| `git` | fetch, push | `git:<host>/<path>` (lowercase, no `.git`, no trailing `/`) |
+
+**Refused at write as asked nowhere** (each with the reason): `steer` / `cancel` /
+`review agent:` (a run is asked as `run:`), `provision volume:`, `author skill:` /
+`team:` / `a2a:` (asked as `def:`), `read mcp:`, `expose a2a:`, `invoke client:` /
+`localapi:` (asked as `tool:`), `recall memory:` (asked as `read`), `manage
+crypto:`. **Removed from the catalog** (v1.140.0): `use search:`, `submit
+evaluation:`, `raise` / `resolve interruption:` — a stored list still loads; every
+write refuses them.
+
+**Type-level-only verbs (v1.146.0).** The run verbs, `read agent:`, `read skill:`
+and `read evaluation:` are asked only of **every** instance, never of a named one —
+which runs a member reaches is decided by who started them, not by a rule. A rule
+on one of them must name `<type>:*`; a selector naming some instances
+(`deny read run:tenant`, `allow cancel run:own`, `read agent:secret/*`) is refused
+with `400 rule_not_enforceable`. One stored earlier keeps its old effect — a deny
+refuses nothing, an allow admits every instance — is reported at boot as
+`type_level_only` and flagged with a `note` in `explain`. To keep an agent from a
+caller, deny `run agent:<name>`; to keep a skill, deny `invoke skill:<name>`.
 
 Because `acl` and `group` are `def:` families, authoring a list is itself an
 access-control decision (`author def:acl/<name>`).
@@ -101,18 +162,36 @@ cannot answer never holds.**
 
 | Field | Shape |
 |---|---|
-| `transport` | list of `http`, `grpc`, `mcp`, `webui`, `a2a`, `webhook`, `schedule`, `bridge`, or `bridge:<name>` |
+| `transport` | list of `http`, `webui` (a Web UI session cookie), `mcp` (`/v1/_mcp` and the stdio server), `grpc`, `a2a`, `webhook`, `schedule` |
 | `time` | `{days: [mon..sun], between: ["HH:MM","HH:MM"], tz: "Europe/Berlin"}` |
-| `interactive` | bool |
-| `tier` / `user_tier` | list of tier names |
-| `source_cidr` | list of CIDRs |
+| `interactive` | bool — the run asked about (a resident child is interactive; outside a run, false) |
+| `source_cidr` | list of CIDRs — the client address (below) |
 | `owner_is_self` | bool |
-| `agent` | glob on the run's agent (inside a run) |
-| `depth` | `{max: N}` — spawn depth |
+| `agent` | glob on the run's agent (outside a run: no agent) |
+| `depth` | `{max: N}` — spawn depth (outside a run: 0) |
 
-In a per-instance question (a Document, Path, credential or definition check) only
-transport and clock are supplied, so a rule conditioned on `agent`, `depth` or
-`tier` never holds there.
+**What changed in v1.140.0** (the boot log names every stored rule whose meaning
+changed):
+
+- **`transport: [http]` no longer covers MCP or the Web UI** — `/v1/_mcp` is now
+  `mcp` and a Web UI request `webui`. A stored rule written for `http` alone must
+  list them too. A transport no surface stamps (`bridge`, `bridge:<name>`) is
+  refused at write.
+- **`source_cidr` applies.** It reads the HTTP peer, or the client a peer in
+  `auth.trusted_proxies` names; on gRPC the peer, or the client a peer in
+  `auth.grpc_trusted_proxies` names (`auth.trusted_proxies` is never consulted for
+  gRPC). The address that started a run is kept with it across a resume or
+  restart; a webhook delivery and an A2A call carry their sender's. A schedule fire
+  has no address, so a `source_cidr` condition holds for neither a deny nor an
+  allow. A stored `source_cidr` deny that used to do nothing now refuses. A
+  proxy list covering all of IPv4 or IPv6 no longer loads (v1.146.0–v1.147.0).
+- **`tier` / `user_tier` are refused at write** — a run request names its own tier
+  and nothing binds it to the caller. A stored one is inert (skipped whole).
+- **`agent`, `depth` and `interactive` are filled** at run intake and in the run.
+
+In a per-instance question (a Document, Path, credential or definition check)
+only transport and clock are supplied, so a rule conditioned on `agent` or
+`depth` never holds there.
 
 ---
 
@@ -158,7 +237,8 @@ acls:
   support-tier-1:
     description: Support staff
     rules:
-      - { effect: allow, actions: [run, read], resources: ["agent:chat/*", "agent:support/**"] }
+      - { effect: allow, actions: [run],       resources: ["agent:chat/*", "agent:support/**"] }
+      - { effect: allow, actions: [read],      resources: ["agent:*"] }   # type-level only: must be agent:*
       - { effect: allow, actions: [read],      resources: ["volume:shared-ro"] }
       - { effect: deny,  actions: [invoke],    resources: ["tool:Bash", "tool:Bashbox"] }
       - { effect: deny,  actions: [run],       resources: ["agent:admin/**"] }
@@ -185,9 +265,14 @@ acl_bindings:
 | `groups:` | name → `{tenant, description, external_id, members: [subjects], groups: [member groups]}` |
 | `acl_bindings:` | list of `{acl, user \| group \| token \| tenant_wide: true, tenant, expires_at}` |
 
-- Config rows merge **under** stored rows: **a stored list of the same name shadows
-  the config one** (as for agents). A config list is reachable from a binding in any
-  tenant; a config group or binding belongs to the tenant it names (`""` = shared).
+- Config rows merge **under** stored rows. **Since v1.140.0 a stored list may not
+  take a config list's name, nor a tenant's list a shared list's name**
+  (`409 acl_name_reserved`). A shadow stored before that still wins; boot and a
+  config reload warn of each, and `explain` reports it as `shadowed_lists`. A
+  binding in a tenant to a name both the tenant and a config or shared list hold is
+  refused as ambiguous (`409 acl_name_shadowed`). A config list is reachable from a
+  binding in any tenant; a config group or binding belongs to the tenant it names
+  (`""` = shared).
 - When the store also has a group of the same name, the members of both are unioned.
 - Listings mark config rows `"source": "config"`; they are read-only over the API.
 - A config reload applies on the next evaluation.
@@ -219,19 +304,28 @@ the ceiling. Names carry the `builtin:` prefix, which a stored list can never us
 |---|---|---|
 | `builtin:admin` | `substrate:admin` | every verb on every type |
 | `builtin:tenant-operator` | `substrate:tenant` | every verb in its tenant except the operator plane; its MCP meta-tools by name |
-| `builtin:member` | a non-isolated member | the collaboration plane: runs, agents, its definitions, memory/SQL/documents in user, agent and tenant scopes, channels, its MCP tools by name (incl. `authz` and `review`, not `groupdef`/`acldef`/`aclbinding`/`ontology`). Reaching `review` is not ruling: each statement asks the `review` verb, which this list does not hold |
+| `builtin:member` | a non-isolated member | the collaboration plane: runs (shown as `run:*` since v1.146.0 — which runs is still its own, by tier), agents, its definitions, memory/SQL/documents in its own user scope and the shared scopes, `browse` only of itself, channels, its MCP tools by name (incl. `authz` and `review`, not `groupdef`/`acldef`/`aclbinding`/`ontology`/`telemetry`). Reaching `review` is not ruling: each statement asks the `review` verb, which this list does not hold |
 | `builtin:isolated` | `substrate:user` | own scope only; denies tenant and global memory, tenant SQL memory and documents, tenant/global history; on MCP only `credentialdef`, `evaluation`, `authz` |
 | `builtin:run-plane` | a token limited to certain agents | denies definition writes, `run team:*`, the gateways, schedule/webhook `manage`, and run deletion |
 
 There is also `builtin:auth-manager` for the `auth:manage` user-management
-credential (the user roster only), and `builtin:scim-provisioner` (v1.127.0)
+credential (the user roster only), `builtin:metrics-reader` (v1.148.0) for a
+`metrics:read` scrape token (`read runtime:metrics`; see
+[observability.md](observability.md)), and `builtin:scim-provisioner` (v1.127.0)
 for a `scim:provision` credential: `read` / `manage` on `principal:scim:*` in
 its own tenant, `mint` denied on every principal — what `/scim/v2` asks (see
 [identity.md](identity.md)).
 
 Two consequences worth knowing: `builtin:run-plane`'s `deny run team:*` holds in
-`compat` too, so **an agent-limited token's runs cannot start team walks**; and in
-`enforce` an isolated user is refused `GET /v1/_users`, which `compat` admits.
+`compat` too, so **an agent-limited token's runs cannot start team walks** (and it
+denies `use` on every gateway kind but the speech surfaces the token was granted);
+and in `enforce` an isolated user is refused `GET /v1/_users`, which `compat`
+admits.
+
+**When the rules cannot be read in `compat`** (v1.140.0), a request keeps its class
+baseline's explicit denies — an isolated user's tenant-wide data stays out of
+reach — and each failure is counted in `loomcycle_acl_resolution_failures_total`
+and audited `acl_resolution_failed`.
 
 ### Related environment variables
 
@@ -251,6 +345,32 @@ Two consequences worth knowing: `builtin:run-plane`'s `deny run team:*` holds in
 - **MCP meta-tools are `mcp-tool:<name>`, verb `invoke`.** A tool a rule denies is
   **absent from `tools/list` and refused on call — for an admin too** (deny holds
   for every class). In `enforce`, an unmatched tool is refused.
+- **Each MCP and gRPC operation asks the same question as its HTTP twin**
+  (v1.140.0, completed v1.146.0), held by tests derived from the source. A tool
+  whose ops are separate routes asks per op: `channeldef` create / update / delete
+  / purge → `manage channel:<name>`; `retention_override` list → `read
+  runtime:retention`, set / clear → `manage`; `erasure` report → `read
+  runtime:erasure`, execute → `manage`; `telemetry` → `runtime:telemetry`. On
+  these tools (and `review`, `ontology`) an unmapped op is refused `unknown_op`,
+  and an `op` or `name` given twice or in two spellings is refused
+  `ambiguous_arguments`. A Memory write over MCP or gRPC asks `write memory:*`
+  (`write sqlmem:*` for `sql_exec` / `sql_begin`); a channel op asks the channel
+  it names; releasing a team channel's held messages asks `manage channel`;
+  `POST /v1/_memory/search` asks `read memory`.
+- **`operatortokendef`** (v1.149.0) asks each op's own verb: `mint` for create and
+  rotate, `manage` for retire, `read` for get and list, of `principal:token:*` (a
+  tenant's scrape tokens: `principal:token:metrics`). The route itself asks only
+  `read`, so an existing `deny mint principal:token:*` no longer hides token
+  metadata — add `deny read principal:token:*` for that.
+- **`use tier:` / `use model:`** (v1.140.0) are asked wherever a model is resolved:
+  run start, a sub-agent, a provider fallback, a resume, a manual compaction or
+  recap, OCR, image description, the LLM gateway; a decision model and the
+  embedding model ask `use model:`. A denied tier refuses; a denied model is passed
+  over for the tier's next candidate (a pinned model has none).
+- **Git** asks `fetch` or `push` of `git:<host>/<path>` after the operator's host
+  lists and the agent's `git_remote` (see [git.md](git.md)).
+- **`mount volume:<name>`** is asked of each volume a member's agent grants; a deny
+  keeps that volume out of the member's agents.
 - **Per-instance checks**, on every transport and inside a run:
 
 | Where | Question |
@@ -323,6 +443,11 @@ re-promote subscribed teams after upgrading. A denied schedule fire is recorded
 | `acl_unavailable` (503, retryable) | the caller's rules could not be read; never admitted in `enforce` |
 | `acl_self_elevation` (403) | a delegated writer tried to bind, join or edit what shapes its own authority |
 | `acl_binding_invalid` (400) | binding to a missing/retired/built-in list, or an expiry in the past |
+| `rule_not_enforceable` (400) | a rule (or an `authz` question, or a simulator draft) names a pair, condition or transport no surface evaluates, or names some instances of a type-level-only verb (v1.140.0 / v1.146.0) |
+| `acl_name_reserved` (409) | a stored list would take a config list's name, or a tenant list a shared list's (v1.140.0) |
+| `acl_name_shadowed` (409) | a binding names a list both the tenant and a config / shared layer hold |
+| `audit_unavailable` (503) | an access-control write whose audit record cannot be written is refused (v1.147.0) |
+| `unknown_op` / `ambiguous_arguments` | an MCP tool op with no HTTP twin, or `op` / `name` given twice (v1.146.0) |
 | `group_external` (409) | member change or upsert on an IdP-owned group |
 | `operator_plane` (403) | management called from inside a run |
 
@@ -355,10 +480,19 @@ One implementation behind four transports, so every gate holds on each.
   to stop an operator lifting a list that binds it.
 - Every write is audited (`acl_written`, `group_written`, `binding_written`,
   `*_retired`, `*_deleted`) and takes effect on the next request on every replica.
+  Since v1.147.0 the intent is recorded **before** the change, and a write whose
+  audit record cannot be written fails with `503 audit_unavailable`.
+- **An admin's list lock holds (v1.140.0).** Retiring a binding, deleting a group,
+  removing a member, deleting / re-enabling / erasing a user and setting a group's
+  `external_id` each ask `retire def:acl/<list>` of every list they would drop — so
+  a deny on retiring a list keeps a tenant operator bound by it from escaping it
+  that way. The removal sweeper, SCIM and gate group sync keep a deny-only list
+  that is locked (audited `auth_unbind_kept_locked`). `explain` on
+  `principal:group:<name>` names those lists (`governed_by`).
 - **`authz`** is open to **any principal about itself**; naming another subject
   (`subject: {id}`) needs a tenant operator. `evaluation` takes `action: {name}`,
-  `resource: {type, id?, owner?}`, optional `context` (transport, interactive, tier,
-  user_tier, agent, depth) and answers `decision`, `outcome` (`allow`, `deny`,
+  `resource: {type, id?, owner?}`, optional `context` (transport, interactive, agent,
+  depth, `source_ip`) and answers `decision`, `outcome` (`allow`, `deny`,
   `no_match`) and the deciding rules. `evaluations` batches up to 256 with
   `options.evaluations_semantic` (`execute_all`, `deny_on_first_deny`,
   `permit_on_first_permit`). `explain` shows every rule of the type and why it did
@@ -452,5 +586,15 @@ Remember that an explicit deny already applies in `compat` the moment it is boun
 | A team subscription ignores the promoter's denies | promoted before v1.126.0 | promote the team again |
 | Rule edit not visible on another replica | bus message lost | wait `LOOMCYCLE_ACL_CACHE_TTL_SECONDS` (default 5) |
 | A config list has no effect | a stored list of the same name shadows it | retire or edit the stored list |
-| A rule with `when: {agent: ...}` never matches a Document/Path/credential check | instance questions supply only transport and clock | express it without `agent`/`depth`/`tier` |
+| A rule with `when: {agent: ...}` never matches a Document/Path/credential check | instance questions supply only transport and clock | express it without `agent`/`depth` |
+| `400 rule_not_enforceable` on a list that used to save | it names a verb asked nowhere, a removed verb (`use search:`, `submit evaluation:`, `interruption:`), a `tier` / `user_tier` condition, a `bridge` transport, or an instance of a type-level-only verb (`run:own`, `read agent:x/*`) | use `acldef op=catalog`; write `<type>:*` for run verbs and `read agent:` / `skill:` / `evaluation:`; deny `run agent:<name>` to keep an agent from a caller |
+| A `deny … run:own` / `allow cancel run:own` stored before v1.146.0 does nothing / admits everything | type-level-only pair named by instance; flagged `type_level_only` at boot and `note` in `explain` | rewrite it on `run:*`; a member reaches only its own runs regardless |
+| A deny written for `transport: [http]` no longer stops MCP or Web UI requests (v1.140.0+) | those transports are now `mcp` and `webui` | list `[http, mcp, webui]` |
+| A `source_cidr` deny suddenly refuses (v1.140.0+) | stored `source_cidr` rules now apply | check `auth.trusted_proxies` / `auth.grpc_trusted_proxies` name your proxies, so the client address is the real one |
+| `409 acl_name_reserved` | the list name belongs to a config or shared list | choose another name |
+| A member gets `404` naming a colleague's `scope_id` | members reach another subject only through an explicit `browse` allow, read-only | bind `allow browse memory:user` / `document:user` (both, for documents) |
+| A member's agent refused at create (`statement_methods`, `git_remote`, `*_def_scopes`) | operator-grade fields are above a member's ceiling | have a tenant operator author it |
+| A model falls through to another candidate / a run refused naming a tier | a `use model:` / `use tier:` deny bound to the caller | `authz op=explain` with `resource: {type: model, id: <model>}` |
+| `deny mint principal:token:*` no longer hides token metadata (v1.149.0+) | `get` / `list` ask `read` | add `deny read principal:token:*` |
+| Access-control writes fail `503 audit_unavailable` | the audit store cannot take a row (v1.147.0+) | restore the store; reductions still go ahead |
 | A demoted user's token still has old reach | the token is `frozen` | rotate it, or mint `inherit` tokens |

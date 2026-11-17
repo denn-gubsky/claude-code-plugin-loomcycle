@@ -59,12 +59,19 @@ Rules that cause most confusion:
   tree — pass `scope` on both.
 
 **What "you" are when you call these tools directly.** A direct MCP call has no
-run. The session is the operator: it holds `agent`, `user` and `tenant` on both
+run. With an operator token the session holds `agent`, `user` and `tenant` on both
 the memory and SQL planes (no `run` — there is no run to key it on). `user`
 resolves to the subject of the token the session authenticated with, so it lines
 up with that user's agent runs and the Web UI. `agent` resolves to the session's
 own synthetic agent, **not to any agent you have in mind** — you cannot read a
 named agent's `agent`-scope keyspace this way.
+
+**A member token is not the operator** (v1.140.0+). It reaches its own `user`
+scope, and another user's only through an explicit access rule
+(`browse memory:user` or `browse document:user`), read-only. Without the rule
+it gets the same `404` a missing user gets, so "not found" may mean "not
+allowed". A member's MCP session has no shared `agent` scope. Since v1.145.0 a
+member also sees only its own conversations in `history`.
 
 The same logical scope is keyed differently by different planes, so do not try to
 reconcile ids across them by hand — address things by `path` instead.
@@ -342,6 +349,9 @@ Traps:
 Use the `erasure` tool (see `/loomcycle:erasure` for the full contract).
 The things to carry into any answer:
 
+0. **It needs `substrate:tenant`** (v1.140.0): an operator's tool, absent from a
+   member's session. A live run also ends the account: the user stays as a
+   tombstone that cannot sign in or be re-created.
 1. **It defaults to a dry run.** A live run needs `dry_run: false` AND `confirm`
    equal to the subject. Never pass those unless the user explicitly asked.
 2. **Tier-3 residue is traceable only through the subject's chats, which a live

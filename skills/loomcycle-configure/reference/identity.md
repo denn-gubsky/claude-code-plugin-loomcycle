@@ -1,4 +1,4 @@
-# Identity and sign-in reference (v1.123.0+; checked against v1.135.0)
+# Identity and sign-in reference (v1.123.0+; checked against v1.156.0)
 
 Two questions, one page:
 
@@ -10,12 +10,19 @@ Two questions, one page:
    *gates*: password, OIDC, OAuth (v1.123.0); external, header, AWS IAM and
    device, `loomcycle login`, and app sign-in through `auth.clients` /
    `ClientDef` (v1.126.0); passkeys, SCIM provisioning, gate-only user tokens
-   and the `loomboard` preset (v1.127.0).
+   and the `loomboard` preset (v1.127.0); verified subjects, erasure tombstones
+   (v1.140.0); one teardown for every credential change, and listing / ending app
+   sign-ins (v1.146.0); paced password sign-ins (v1.153.0).
 
 Users are **stored records** now. Each has a `status` — `active`, `disabled` or
 `pending` — an `access_mode` (`isolated`, `tenant`, …), groups, and the sign-in
 identities linked to it. A `pending` user has signed in but waits for an
 operator's approval and can do nothing else.
+
+**An erased user is a tombstone (v1.140.0).** A live subject erasure ends every
+sign-in, deletes every sign-in identity, and keeps the user row PII-free with
+`erased_at` set and status `disabled`. It cannot sign in, be re-enabled, renamed,
+deleted or created again: `409 user_erased`. A snapshot carries the tombstone.
 
 A user id (subject) is letters, digits, `_`, `-` and, since v1.131.0, `:` `.`
 `@` `|`, up to 320 characters — so a gate user such as `cloud:<id>`,
@@ -134,8 +141,8 @@ agents:
 - **Sub-agents** read with the originating person's rules: a child sees no more
   than its root. A `held` plane that failed to read is named in `errors`; its
   count is a lower bound, never zero.
-- **Audit:** with `LOOMCYCLE_AUDIT_LOG_PATH` set, every lookup of *another*
-  person or a group is recorded as `identity_lookup`.
+- **Audit:** every lookup of *another* person or a group is recorded in the audit
+  trail as `identity_lookup` (op, outcome, run, agent, target).
 
 ### The MCP `identity` tool (outside a run)
 
@@ -168,7 +175,7 @@ it on every replica.
 
 ```yaml
 auth:
-  mode: strict                    # token (default) | strict; env LOOMCYCLE_AUTH_MODE
+  mode: strict                    # token (default) | strict; env LOOMCYCLE_AUTH_MODE (the stricter wins, v1.153.0)
   session: { idle: 8h, absolute: 168h, reauth_window: 15m }
   lifecycle:
     new_user: { access_mode: isolated, groups: [everyone, new-users], status: pending, token_ttl: 12h }
@@ -195,9 +202,67 @@ auth:
   lets a newcomer reach only an "awaiting approval" page until an operator
   approves them in the Users console (`POST /v1/_users/{subject}/approve`).
 - **An operator's disable** (`PATCH /v1/_users/{subject}` with
-  `status: disabled`) ends the user's Web UI sessions, retires its tokens and
-  takes the user from SCIM (v1.127.0); a re-enable that raced a new disable
-  answers 409.
+  `status: disabled`) ends the user's Web UI sessions, **app sign-ins** (v1.140.0)
+  and delegated tokens, and takes the user from SCIM (v1.127.0); a re-enable ends
+  any sign-in left live, and one that raced a new disable answers 409.
+- **`auth.login_origins`** (yaml only since v1.153.0; the old environment
+  variable is no longer read and stops the boot while it lists an origin the yaml
+  does not name) lists the first-party origins the login page may take a bearer
+  from over `postMessage` — a landing page that mints tokens. One origin per list
+  item; empty (the default) leaves the receiver off. Token mode only.
+
+  ```yaml
+  auth:
+    login_origins: ["https://landing.example.com"]
+  ```
+
+### Ending sign-ins — one teardown (v1.146.0+)
+
+Disable, re-enable, erasure, user delete, password reset, self-service password
+change and credential removal all end **the same set** of sign-ins — app sign-ins
+(refresh-token families and the access tokens issued through them), delegated and
+device-login (`loomcycle login`) tokens, and Web UI sessions — and each retired
+token is audited.
+
+| Change | What ends |
+|---|---|
+| Password **reset** (`POST /v1/_auth/reset`) | every sign-in; the browser that reset gets a new session. Since v1.148.0 a reset also **removes passkeys added since the password was last set** (not the one that confirmed the reset); the reset page names what was removed and kept |
+| Self-service **password change** (`POST /v1/_auth/password`) | every sign-in **except** the browser that made it |
+| Removing a **passkey** or the **authenticator app** (v1.147.0) | app sign-ins and delegated tokens; a removed passkey also ends the Web UI sessions signed in with it |
+| Operator `DELETE /v1/_authgate/{gate}/credentials/{subject}` or `DELETE /v1/_users/{subject}` | the same set as a disable |
+| Disable, erasure | everything; erasure also deletes the identities and leaves a tombstone |
+
+Connected apps (loomboard, `loomcycle login`) then sign in again. Operator and
+tenant-operator tokens and config principals of the same subject are roles, not
+the person's sign-ins: retire them with `operatortokendef`.
+
+**Listing and ending app sign-ins** (HTTP and gRPC; not on MCP):
+
+| Route | Who |
+|---|---|
+| `GET /v1/_users/{subject}/app-sign-ins`, `DELETE …/app-sign-ins/{family_id}` | tenant operator or admin (`read` / `manage principal:user:<subject>`) |
+| `GET /v1/_me/app-sign-ins`, `DELETE /v1/_me/app-sign-ins/{family_id}` | the signed-in person, for their own |
+
+Each entry carries `family_id`, the app's id and label, the gate, and when it was
+created, last used and expires — never a token. Ending one retires its access
+tokens on every replica (`oauth_revoked`); a half-ended one finishes on retry. An
+app's own token is refused on all four routes (`403 app_token_refused`), so one
+app cannot sign a person out of the others. An unknown family is
+`404 app_sign_in_not_found`.
+
+**Paced password sign-ins (v1.153.0).** Overlapping password sign-ins for one
+login are checked one at a time, each taking its place before the throttle is
+read (per source, per source and login, per login); the same holds for second
+factor codes posted to a reset or invite link. A sign-in waits **up to 3 seconds**
+for its turn and is then told to wait (`429`), charged nothing. A guess is charged
+even when its client disconnects before the answer. The in-flight bound is per
+replica; failure counts and holds are in the store, shared by all replicas.
+
+**The client address behind a proxy.** Throttles, the audit trail and
+access-control `source_cidr` rules read the client address: list your proxy's own
+fixed address in `auth.trusted_proxies` (and `auth.grpc_trusted_proxies` for an L7
+gRPC proxy). An entry, or a set of entries, covering all of IPv4 or IPv6 no longer
+loads (v1.146.0–v1.147.0); a range wider than /16 (IPv4) or /48 (IPv6) warns.
 
 ### Gate kinds
 
@@ -224,9 +289,31 @@ and only into its own `<gate>:` groups.
 | `passkey` | password-less sign-in with a passkey (v1.127.0; at most one) | `label` only; needs a usable `LOOMCYCLE_PUBLIC_URL` |
 | `scim` | an identity provider pushes joiners, movers and leavers over SCIM 2.0 (v1.127.0; at most one; never a sign-in) | `trusted`, `identity_map`, `max_sync_removals`, `max_sync_creates`, `on_removed` |
 
-Subjects are `<gate>:<id>` — the provider's `sub` or numeric user id, never an
-e-mail or a renameable login. Password, header and AWS IAM gates are built at
-boot: a reload that adds one leaves it refusing until a **restart**.
+Subjects are `<gate>:<id>` — the provider's stable id. Password, header and AWS
+IAM gates are built at boot: a reload that adds one leaves it refusing until a
+**restart**.
+
+**The subject is never an unverified claim (v1.140.0).**
+
+- The subject claim is `sub` unless `identity_map.subject` names another; only
+  `sub` (any gate), `oid` (`entra` preset) and `arn` (`awsiam`) are accepted as
+  stable. **Any other claim** (`email`, `preferred_username`, an employee id)
+  **fails the config load** unless `identity_map.subject_claim_immutable: true` —
+  the operator's word that the provider never lets the user change it or
+  reassigns it. Check that at the provider first: whoever the provider puts in
+  that claim signs in as the user made for that value.
+- **An address subject** (an `email` / `upn` claim, or any value with `@`) signs
+  in only when the assertion's own e-mail is verified and equal to it; otherwise
+  the sign-in is refused (`auth_login_failed`, reason `subject_unverified`) and
+  nothing is linked. On Entra key on `oid` (Entra tokens do not mark addresses
+  verified). The OAuth gate's subject is always `sub`, the SCIM gate's the SCIM id.
+
+```yaml
+identity_map:
+  tenant: acme
+  subject: employee_id
+  subject_claim_immutable: true   # required for any claim but sub / oid / arn
+```
 
 ```yaml
 auth:
@@ -366,16 +453,18 @@ people, at that gate's ceiling.
 - Two gates may not share a key; a gate is config-only (a key is a trust anchor).
 - **Removal** (`auth.lifecycle.on_removed`, or a gate's own `on_removed`):
   `{disable: at_once, unbind_after: 7d, erase_after: never, reactivate: operator}`.
-  Disable ends sessions and retires tokens; unbind drops gate-managed groups and
-  the user's own ACL bindings; erase (≥24h, needs `LOOMCYCLE_AUDIT_LOG_PATH`)
-  runs subject erasure. `dormant_after` (default `never`, ≥24h) starts removal
+  Disable ends sessions and app sign-ins and retires tokens; unbind drops
+  gate-managed groups and the user's own ACL bindings (a locked deny-only list is
+  kept); erase (≥24h) runs subject erasure and needs an audit sink — the
+  store-backed audit stream, on whenever a gate is configured, or
+  `LOOMCYCLE_AUDIT_LOG_PATH`. `dormant_after` (default `never`, ≥24h) starts removal
   for someone with no sign-in for that long. Re-activating returns a user to
   the new-user defaults, not their old groups.
 - **Bridges as gates:** `@loomcycle/bridge-core` 0.3+ runs a bridge this way
   (`BRIDGE_GATE*` settings; the bridge's own token is refused then).
   `identity_map.legacy_subject_prefix: telegram-` makes a person's first login
-  link the old `telegram-42` user instead of creating `telegram:42` — only a
-  user with no password and no gate identity. External gates only.
+  link the old `telegram-42` user instead of creating `telegram:42` — never a
+  user that has any sign-in of its own (v1.140.0). External gates only.
 
 Every gate-issued token stops at once when its user is no longer `active` or
 its gate is taken out of the config, on every replica.
@@ -497,3 +586,12 @@ gate's provisioning floor (`403 target_beyond_floor`).
 | `403 user_tokens_gate_only` / a pasted user token refused everywhere | `auth.strict.user_tokens: gate_only`; get the token from a gate (`loomcycle login`). |
 | A pasted user token no longer opens the Web UI (strict) | Since v1.127.0 strict mode accepts only gate sign-ins in the browser. |
 | SCIM `429` | `max_sync_creates` / `max_sync_removals` reached for the rolling 24 h. |
+| Config fails to load after upgrading to v1.140.0+, naming `identity_map` | The gate keys the subject on a claim other than `sub` / `oid` / `arn`. Confirm the provider never reassigns it, then set `identity_map.subject_claim_immutable: true` — or key on `sub` |
+| Sign-in refused, audit says `subject_unverified` | An address subject whose e-mail the provider did not mark verified, or a different address. Key on a stable id instead (`oid` on Entra) |
+| `409 user_erased` | The user was erased and is a tombstone; it cannot be re-enabled, renamed, deleted or created again. Use a new subject |
+| Everyone's loomboard / CLI sign-in ended after a password change | Expected since v1.146.0: a reset ends every sign-in, a self-service change all but the current browser. Sign in again |
+| A passkey vanished after a password reset | v1.148.0+: passkeys added since the password was last set are removed by a reset. Register it again |
+| A password sign-in answers `429` at once under load | Overlapping sign-ins for one login are paced (v1.153.0); it waited its 3 s turn. Retry after a moment |
+| `403 app_token_refused` on `/v1/_me/app-sign-ins` | An app's own token cannot list or end app sign-ins. Use a person's session or API token |
+| Boot stops naming the old login-origins variable | Move the list to `auth.login_origins` in the yaml (v1.153.0), one origin per item |
+| A config with `trusted_proxies: [0.0.0.0/0]` no longer loads | v1.146.0+. List the proxy's own address |
