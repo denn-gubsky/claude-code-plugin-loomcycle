@@ -13,7 +13,7 @@ clusters where two tools sound alike, which one owns which job, and the traps
 that cost a wasted call. For the authoritative text of any one tool, ask the
 session: `context` with `op=doc` returns a tool's full schema.
 
-**68 tools** as of loomcycle v1.135.0. The tool your session holds may be
+**69 tools** as of loomcycle v1.156.0 (`telemetry` is listed only where the operator turned tenant telemetry on). The tool your session holds may be
 fewer: your token's scopes and access-control rules remove tools from the list
 (see *What your token can reach*).
 
@@ -167,6 +167,12 @@ nodes and the transitions between them. Its ops are `create`, `fork`, `get`,
 - Poll mode (`op=poll`, `op=cancel`, `mode: "poll"`) reports to a calling
   agent's run, so it exists only inside a run and is not offered over MCP.
 - Authoring a team needs no run scope; `op=run` needs `runs:create`.
+- **Teams declared in the operator's yaml live in the shared tier** (v1.156.0)
+  and can be changed only there. While a configured version is active,
+  `create`, `fork`, `promote`, `retire` and `delete` of that name in the shared
+  tier are refused, admins included. A tenant may still fork it into its own
+  tenant. A tenant
+  can **run a shared team by name** (v1.155.0).
 - A team can ask a **decision model** directly (a state of kind `decision`,
   v1.109.0). Its answers are `team_decision` events on the walk's own run.
 - **A team's own channels** (declared inside the team) are invisible to
@@ -254,7 +260,7 @@ The split is by **shape**, not by topic:
   copies up to 500 documents server-side with their history, images and the
   relations between them. `export_md` + `import_md` would mint new ids, keep only
   the current text and drop every relation. It is a dry run unless
-  `dry_run: false`. **`op=move_documents`** (on main after v1.135.0) moves a set
+  `dry_run: false`. **`op=move_documents`** (v1.136.0+) moves a set
   and keeps every id. A relation leaving the set refuses it unless
   `dangling: "drop"`, and a real move needs the dry run's count as
   `expect_count`. An interrupted move resumes when the same call runs again. See
@@ -296,6 +302,17 @@ concept schemes and the review policy.
   merges and binds.
 - The runtime's own guide is `context` `{"op": "help", "topic":
   "knowledge-base"}`, with call sequences.
+- **Newer `document` ops** (v1.143.0–v1.153.0):
+  - annotations: briefs of sections, documents and folders (`get_annotation`,
+    `set_annotation`, `list_annotations`, `delete_annotation`,
+    `annotation_inputs`, and `with_summary` on retrieval);
+  - `lineage`: a chunk's sections, document and folders, with their briefs;
+  - `find_duplicates`: a report, or `duplicate_of` proposals;
+  - `mark_source`: a source that was removed or trashed;
+  - `effective_policy`: what file-plan concepts declare;
+  - search `facets`.
+
+  See `/loomcycle:documents duplicates`.
 
 See `/loomcycle:kb-review`, `/loomcycle:subjects` and the `loomcycle-configure`
 skill's `reference/knowledge-base.md`.
@@ -324,7 +341,7 @@ See `/loomcycle:decide`.
 | Tool | Owns |
 |---|---|
 | `identity` | READ-ONLY. Who you are (`whoami`), the people and groups of your tenant (`profile`, `user`, `users`, `group`, `groups`), whether a person may do something (`can`, `explain`), and what is held for one subject (`held`). `tenants` is admin-only. |
-| `erasure` | Report or erase what the deployment holds about one subject. |
+| `erasure` | Report or erase what the deployment holds about one subject. Needs `substrate:tenant` (v1.140.0): a member's session does not have it. A live run leaves the user a tombstone that cannot sign in again. |
 
 - **`identity` replaced `directory` in v1.126.0, with no alias.** `directory
   op=users` is `identity op=users` (`active_only: true` for the old activity
@@ -387,9 +404,14 @@ or WebFetch response) is kept in the run's **inbox**, and the model sees a
 one-line `[file: volume:inbox:… · type · size · sha256 · from …]` stub instead
 of the bytes. `file` reaches that inbox from outside the run, by `run_id`.
 
-- Ops: `stat`, `ls`, `extract` (DOCX/XLSX/PPTX/HTML/PDF/CSV → Markdown plus an
-  excerpt), `import` (a Document in **your** scopes), `keep` (copy into a
-  read-write dynamic volume of your tenant), `rm`, `clear`.
+- Ops: `stat`, `ls`, `extract` (DOCX/XLSX/PPTX/ODT/HTML/PDF/CSV → Markdown plus
+  an excerpt), `import` (a Document in **your** scopes), `keep` (copy into a
+  read-write dynamic volume of your tenant), `rm`, `clear`, and **`render`**
+  (v1.156.0).
+- **`render` needs no `run_id`** (the `file` tool itself still needs `runs:read`
+  to be listed). It writes a Document you may read as `pdf`,
+  `docx`, `html` or `md` into a read-write dynamic volume of your tenant. See
+  `/loomcycle:files render` and `/loomcycle:documents render`.
 - Reading (`stat`, `ls`, `import`) is for anyone who can `get_run` the run;
   `extract`, `keep`, `rm`, `clear` for its owner or an admin (a tenant operator
   counts for its own tenant).
@@ -400,6 +422,26 @@ of the bytes. `file` reaches that inbox from outside the run, by `run_id`.
 - `extract`'s excerpt is untrusted content (fenced `file_content`).
 
 See `/loomcycle:files`.
+
+### Telemetry — a tenant's own traces and metrics (v1.151.0)
+
+`telemetry` sends **this tenant's** traces, and its own series of the
+deployment's metrics, to an OTLP collector the tenant runs. Ops: `get`
+(policy and export status), `set` (replaces the whole policy), `test` (one test
+span), `delete`.
+
+- An admin or a tenant operator, and only where the operator turned tenant
+  export on. Otherwise the tool is absent, or answers `feature_disabled`.
+- Header secrets never go in the call. Store them as a tenant credential
+  restricted by `allowed_urls` to the endpoint, and name it in
+  `headers_credential`.
+- `content_capture: on` also sends prompts, answers and tool calls (masked and
+  cut). It is refused unless the operator allows it, and what reaches the
+  collector is beyond loomcycle's erasure. No-trace runs are never exported.
+- The deployment's own telemetry is operator config, and `/metrics` is scraped
+  with a `metrics:read` token.
+
+See `/loomcycle:telemetry`.
 
 ### Cryptography
 
@@ -517,20 +559,24 @@ Several things decide which tools a session sees. A tool you may not call is not
 merely refused: it is **absent from `tools/list`**. If a tool you expect is
 missing, check here before assuming the runtime is broken.
 
-**1. Twelve tools are admin-only.** They are runtime-global with no tenant
+**1. Eleven tools are admin-only.** They are runtime-global with no tenant
 dimension:
 
 ```
 create_snapshot   list_snapshots   get_snapshot      export_snapshot
 restore_snapshot  delete_snapshot  pause_runtime     resume_runtime
-get_runtime_state resolve_probe    operatortokendef  list_channels
+get_runtime_state resolve_probe    list_channels
 ```
 
-The other **56 are tenant-confinable**: a tenant session may call them, and the
+`operatortokendef` left this list in v1.149.0. A tenant operator may use it for
+its own tenant's `metrics:read` scrape tokens and nothing else; every other mint
+is still the admin's.
+
+The other **58 are tenant-confinable**: a tenant session may call them, and the
 runtime stamps your tenant on what you write and folds another tenant's rows to
 an opaque not-found on read.
 
-**2. Twenty-nine of those 56 also need a scope.** A token that lacks it does
+**2. Thirty-two of those 58 also need a scope.** A token that lacks it does
 not see the tool:
 
 | Scope | Tools |
@@ -540,7 +586,7 @@ not see the tool:
 | `runs:delete` | `delete_run_tree` |
 | `channel:publish` | `publish_channel`, `ack_channel`, `release_team_channel` |
 | `channel:read` | `subscribe_channel`, `peek_channel`, `list_team_channels`, `peek_team_channel` |
-| `substrate:tenant` | `groupdef`, `acldef`, `aclbinding`, `clientdef`, `crypto`, `retention_override`, `ontology` |
+| `substrate:tenant` | `groupdef`, `acldef`, `aclbinding`, `clientdef`, `crypto`, `retention_override`, `ontology`, `erasure`, `operatortokendef`, `telemetry` |
 
 `substrate:tenant` implies every scope above, and `substrate:admin` implies
 everything. A member token (non-isolated, without `substrate:tenant`) has
