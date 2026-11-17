@@ -12,8 +12,11 @@ authorization). Each token binds an **authoritative principal**
 the wire `tenant_id` / `user_id`, so per-subject fairness and per-tenant
 isolation become real boundaries. Wraps the `operatortokendef` meta-tool.
 
-**Operator-admin only.** The calling MCP bearer must carry `substrate:admin`
-(see the note at the end). Parse `$ARGUMENTS`:
+**Operator-admin**, with one exception (v1.149.0+): a **tenant operator**
+(`substrate:tenant`) may create, rotate, retire, get and list its own tenant's
+**metrics scrape tokens**: `scopes: ["metrics:read"]` and nothing else. Those
+tokens are always confined to the tenant's own series. Any other mint needs
+`substrate:admin` (see the note at the end). Parse `$ARGUMENTS`:
 
 - First token = the op: one of `create | rotate | retire | get | list`.
 - `--name=<n>` — token name (required for `create` and `list`; `create` /
@@ -115,6 +118,8 @@ one.
 | `runs:delete` | Permanently delete a run tree (`delete_run_tree`). Implied by `substrate:tenant`; a member or isolated user has it only when granted at mint. |
 | `llm:gateway` | The raw model endpoints (LLM gateway, OpenAI-compatible chat and embeddings). Implied by `substrate:tenant`; an isolated user needs it by name. |
 | `auth:manage` | A sign-up website's user-management credential: the password gate's management API and user create/list/update/delete, across tenants, and nothing else. Minted **alone**. |
+| `scim:provision` | An identity provider's SCIM 2.0 client: `/scim/v2/*` in its own tenant and nothing else. Minted **alone**. |
+| `metrics:read` | A Prometheus scraper's credential: `GET /metrics` and nothing else (v1.148.0+). Minted **alone**. A tenant operator's is confined to its tenant's series. The scrape token sits in a file on a monitoring host, so it opens no other route. |
 
 Pass the **narrowest** set. Omitted scopes are not granted.
 
@@ -128,7 +133,9 @@ to one, and a token that lacks a tool's scope does not see that tool:
 | `/loomcycle:whoami`, memory, documents, paths, definitions | nothing beyond being a non-isolated token of the tenant |
 | `/loomcycle:access check` / `explain` / `simulate` | any token not limited to certain agents (it asks about itself) |
 | `/loomcycle:access` groups, policies, bindings | `substrate:tenant` |
-| `/loomcycle:operator-token`, `/loomcycle:snapshot` | `substrate:admin` |
+| `/loomcycle:operator-token` | `substrate:admin`; a tenant operator may mint only its own `metrics:read` scrape tokens |
+| `/loomcycle:snapshot` | `substrate:admin` |
+| `/loomcycle:telemetry`, `/loomcycle:subjects` | `substrate:tenant` |
 
 Access-control rules can narrow any of this further. An explicit deny bound to
 the token removes the tool from the session in every `LOOMCYCLE_ACL` mode, even
@@ -159,7 +166,8 @@ tokens"* section and `examples/README.md`.
 
 ## Scope note — depends on the transport
 
-`operatortokendef` is operator-admin-only. Since 0.21.0 the default stdio
+`operatortokendef` is operator-admin-only, apart from a tenant operator's own
+`metrics:read` tokens. Since 0.21.0 the default stdio
 transport is a **thin client** that proxies to the runtime's `/v1/_mcp`, so
 authority is governed by the **`auth_token` principal on the upstream** — the
 same enforcement as the direct HTTP transport:
@@ -169,7 +177,8 @@ same enforcement as the direct HTTP transport:
   `LOOMCYCLE_AUTH_TOKEN` resolves to an admin principal, so an operator driving
   their own runtime keeps full access.
 - **scoped `lct_…` `auth_token`** — a narrow per-tenant bearer lacks
-  `substrate:admin` and gets a `scope` refusal. Surface it plainly; it is **not**
+  `substrate:admin` and gets a `scope` refusal (a `substrate:tenant` token may still
+  mint `metrics:read` scrape tokens for its own tenant). Surface it plainly; it is **not**
   a plugin bug (a confined per-tenant key is *meant* to be unable to mint
   tokens). This applies to **both** the default stdio thin client and the direct
   HTTP transport in `examples/mcp-http-tenant.json` — both route through the

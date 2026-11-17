@@ -40,6 +40,13 @@ session's own synthetic agent, not a named agent's keyspace; `run` is not
 available. The session holds `agent`, `user` and `tenant` on both the memory and
 the SQL plane.
 
+**A member token reaches only its own data** (v1.140.0+). Naming another user
+with `scope_id` works only through an explicit access rule
+(`browse memory:user`; a memory grant does not read documents), and then
+read-only. Without one, the answer is the same `404` as for a user who does not
+exist, so a "not found" here may be a permission. A member's MCP session has no
+shared `agent` scope. Operators and admins are unchanged.
+
 For an *agent*, `tenant` requires the operator to have granted BOTH
 `memory_scopes` and `sql_scopes` with the `tenant` value — granting one and not
 the other is the usual cause of a refusal that looks like a bug. Unset grants

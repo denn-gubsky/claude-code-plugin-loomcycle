@@ -1,6 +1,6 @@
 ---
-description: Inspect, extract, keep or import the files a loomcycle run's tools returned (the run inbox), without their bytes passing through the conversation.
-argument-hint: "<run_id> [ls|stat|extract|import|keep|rm|clear] [path] [--to=volume:<name>:<path>] [--scope=…] [--title=…] [--overwrite]"
+description: Inspect, extract, keep or import the files a loomcycle run's tools returned (the run inbox), or render a Document to a PDF, Word, HTML or Markdown file — without the bytes passing through the conversation.
+argument-hint: "<run_id> [ls|stat|extract|import|keep|rm|clear] [path] [--to=volume:<name>:<path>] [--scope=…] [--title=…] [--overwrite] | render <document_id|doc_path> --format=pdf|docx|html|md --to=volume:<name>:<path> [--chunk=<id>] [--toc] [--title-page]"
 allowed-tools: mcp__loomcycle__file mcp__plugin_loomcycle_loomcycle__file mcp__loomcycle__get_run mcp__plugin_loomcycle_loomcycle__get_run
 ---
 
@@ -70,6 +70,42 @@ op uses.
   Markdown (from `extract`'s excerpt) to pick line numbers.
 - `source` records a link back to where the file came from (a SharePoint item,
   an email, a URL) in the document's provenance.
+
+## `render` — a Document as a file (v1.156.0+ over MCP)
+
+`render` needs **no run**. If the first token is `render`, there is no `run_id`.
+The `file` tool itself is listed only for a token with `runs:read`.
+
+```json
+{ "op": "render", "document": "<document id>", "format": "pdf",
+  "to": "volume:<name>:<path>", "scope": "user" }
+```
+
+- The document goes in as `document` (an id) or `doc_path` (its Path name):
+  exactly one of the two. It must be a document you may read, in your own
+  scopes.
+- `format`: `pdf` (paged, typeset), `docx`, `html` (one self-contained page) or
+  `md` (with its pictures as files beside it).
+- `to` is required: a **read-write dynamic volume of your tenant**, as for
+  `keep`. Add `"overwrite": true` to replace an existing file.
+- Options:
+  - `chunk`: only one section, whose title becomes the file's title;
+  - `toc`: a table of contents;
+  - `title_page`: the title on a page of its own;
+  - `provenance` (default true): say where an imported document came from;
+  - `page_size`: `a4` or `letter`;
+  - `language`.
+- Render `ref`, `size`, `sha256` and whether an unchanged earlier file was
+  `reused`. Also report what was left out (`images_skipped`, `bodies_cut`,
+  `links_flattened`), or the user may think the file is complete when it
+  isn't.
+- A `pdf` refusal saying the server has no typesetter means the deployment
+  lacks Typst where it converts files. Offer `docx` instead.
+- Too large (over 64 MiB, or a PDF over 2000 pages): render a section with
+  `chunk`.
+
+To hand the file to a person instead of a volume, the Web UI document toolbar
+has a download menu, and HTTP has `GET /v1/_document/export/{id}` (v1.156.0).
 
 ## What it will not do
 

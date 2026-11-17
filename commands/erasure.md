@@ -19,6 +19,10 @@ Parse `$ARGUMENTS`:
 subject id is only unique within one. If you need another tenant's subject, you
 need a token for that tenant.
 
+**Who may call it:** since v1.140.0 the tool needs `substrate:tenant`, so an
+admin or a tenant operator. A member's session does not have the tool. A
+missing `erasure` tool on a member token is expected, not a plugin fault.
+
 ## `report` — read-only
 
 ```json
@@ -75,6 +79,23 @@ the only durable record of what was not reached.** Print it in full and tell the
 user to keep it. Do not re-run a report afterwards and report `0` as
 confirmation — the tool will mark tier 3 `UNDETERMINABLE` in that state, and you
 should relay that word rather than the zero.
+
+## What a live run also does
+
+- **It ends the account** (v1.140.0). Every sign-in family is deleted in the same
+  transaction, and the user row is kept as a PII-free **tombstone**
+  (`erased_at`). An erased user cannot sign in, be re-enabled, renamed,
+  deleted or created again (`409 user_erased`). Say this before a live run:
+  it is not just a data wipe.
+- **Access** (v1.122.0+): the subject's group memberships and user bindings
+  are removed, and its member tokens are revoked. The result's `access` field
+  lists them. Tokens holding `substrate:tenant` or `substrate:admin` are kept
+  and named under `retained`, and so are config-declared memberships (remove
+  those from the config file).
+- **Bound subjects** (v1.131.0+): a knowledge-base subject bound to this user
+  is reported under `bound_subjects`. The binding is cleared and an `erased`
+  event announced, but the subject document itself is **not** deleted. That
+  stays an operator's call (`/loomcycle:subjects`).
 
 ## What it deliberately does not delete
 
