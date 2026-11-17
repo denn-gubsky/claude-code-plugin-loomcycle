@@ -4,6 +4,78 @@ All notable changes to this project are documented here. The format follows
 [Keep a Changelog](https://keepachangelog.com/) and the project adheres to
 [Semantic Versioning](https://semver.org/).
 
+## [1.13.0] — 2026-11-17
+
+**Brought up to loomcycle v1.156.0.** The release that matters most is
+v1.153.0, which moved the settings. About 150 `LOOMCYCLE_*` variables are no
+longer read: policy and tuning moved to the yaml, unused limits became fixed
+values, and seven feature switches are gone because the features are always
+on. The store and SQL Memory are inferred, and retention needs
+`retention.enabled: true`. 96 of those variables appeared in the plugin; none
+is now given as a live setting. Also since v1.135.0:
+- a stricter member plane (v1.140.0);
+- 69 MCP tools (`telemetry` is new);
+- 73 Document ops (annotations, `lineage`, `find_duplicates`, `mark_source`,
+  `effective_policy`; `move_documents` shipped in v1.136.0);
+- rendering documents to files, conversion workers, OAuth credentials for MCP
+  servers, operator observability and tenant telemetry.
+
+Version bump `1.12.0 → 1.13.0` (`plugin.json` + `marketplace.json`).
+
+### Added
+
+- **`/loomcycle:telemetry`** (`telemetry`): a tenant's own traces and metrics to
+  its own OTLP collector. `get`, `set` (which replaces the whole policy; header
+  secrets only through a credential), `test`, `delete`; warns before content
+  capture.
+- **`/loomcycle:documents duplicates`** (`find_duplicates`: report by default,
+  `duplicate_of` proposals with `--propose`) and **`render`** (a Document as a
+  PDF, Word, HTML or Markdown file).
+- **`/loomcycle:files render`** (MCP `file op=render`, no run needed).
+- **`skills/loomcycle-configure/reference/settings.md`**: the environment, yaml
+  and constant planes, precedence, inferred settings, the `personal` and
+  `server` presets, and the upgrade checklist for crossing v1.153.0.
+- **`skills/loomcycle-configure/reference/observability.md`**: `OTEL_*`,
+  `/metrics` and the `metrics:read` scrape token, the shipped dashboards, tenant
+  telemetry and content capture.
+
+### Changed
+
+- **`env-vars.md` rebuilt**: only variables v1.156.0 reads, a table of fixed
+  values, and a "retired in v1.153.0" table saying where each went.
+- **Retired variables swept** from `profiles.md` (now built on the `personal` /
+  `server` presets), routing, volumes, webhooks, hooks, bashbox, interactive,
+  git, document, knowledge-base, files and the skill index. Documents now need
+  "SQL Memory, which follows the store" rather than a feature switch.
+- **`/loomcycle:operator-token`**: a tenant operator may mint its own
+  `metrics:read` scrape tokens; the scope catalogue gains `scim:provision` and
+  `metrics:read`.
+- **`/loomcycle:erasure`**: needs `substrate:tenant`; a live run leaves a
+  tombstone and reports access and bound subjects.
+- **`/loomcycle:documents move`**: v1.136.0+, with the stricter access checks
+  from v1.140.0.
+- **`/loomcycle:memory`** and the `loomcycle-memory` skill: a member reaches
+  only its own data.
+- **`reference/mcp-tools.md`**:
+  - 69 tools; `telemetry`;
+  - `operatortokendef` is no longer admin-only;
+  - `erasure` needs `substrate:tenant`;
+  - reach counts 58/32;
+  - `file op=render`;
+  - shared-tier teams;
+  - the newer Document ops.
+- **Reference pages:**
+  - `document.md` (73 ops) and `knowledge-base.md` (annotations, `kb/ask` /
+    `kb/survey` / `kb/walker`, `@norm`, `tool_modes`, duplicates, changing
+    sources, `skybits-sync`);
+  - `files.md` (conversion workers, render, heading recovery, per-server base64
+    threshold, speech routes);
+  - `credentials.md` (OAuth credentials, `$oauth:`);
+  - `access-control.md` (four caller tiers, rules that must be enforceable,
+    `mcp` / `webui` transports);
+  - `identity.md` (verified subjects, the erased-user tombstone, sign-in
+    teardown).
+
 ## [1.12.0] — 2026-11-02
 
 **Brought up to loomcycle v1.135.0: the Document tool as a knowledge base.**
