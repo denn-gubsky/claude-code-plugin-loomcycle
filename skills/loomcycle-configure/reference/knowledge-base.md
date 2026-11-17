@@ -1,4 +1,4 @@
-# Knowledge base reference — statements, ontology, review (v1.128.0+; checked against v1.135.0)
+# Knowledge base reference — statements, ontology, review, annotations (v1.128.0+; checked against v1.156.0)
 
 A **knowledge base** is not a separate tool. It is the Document tool used for more
 than text: documents hold the source material, **facts** record claims about
@@ -11,8 +11,12 @@ entity tier, search, `copy_documents` and `graph_snapshot` are in
 For call sequences an agent follows (answer citing a regulation, file a relation,
 find what cites an act, record a fact, after a new edition), read the runtime's own
 guide instead of copying it: `Context op=help topic=knowledge-base` in a run, or the
-MCP `context` tool with `{"op": "help", "topic": "knowledge-base"}`. Each op has its
-own article, `topic: "Document/<op>"`.
+MCP `context` tool with `{"op": "help", "topic": "knowledge-base"}`. Typical
+*questions* and the calls that answer each are `topic: "knowledge-base-questions"`.
+Each op has its own article, `topic: "Document/<op>"`. An agent prompt can pull an
+article's call examples in with **`{{help:<topic>}}`** (v1.153.0; refused at
+authoring if the topic is missing, has no examples or exceeds 8 KiB), so the
+prompt's samples stay in step with the tool's help.
 
 | Piece | What it is | Made with | Read with |
 |---|---|---|---|
@@ -23,11 +27,13 @@ own article, `topic: "Document/<op>"`.
 | statement | a directed relation `from_id` → `to_id` of a `kind`, with status and evidence | `link_chunks`, `propose_statement`, `upsert_chunk relation` | `get_edges`, `get_edge`, `backlinks`, `list_statements` |
 | evidence | the verbatim quote a statement rests on, and where it is | the `evidence` argument | `get_edge` |
 | ontology | the tenant vocabulary: classes, relation kinds, schemes, instances, review policy | an operator edits and confirms it | `describe_ontology` |
+| annotation | a brief and an abstract about a section, document or folder (tenant scope) | `kb/annotator`, or an operator | `get_annotation`, `with_summary`, `lineage` |
 
 A shared knowledge base is almost always the **`tenant` scope**: every call passes
 `"scope": "tenant"`, and a chunk id from one scope is "no such chunk" in another. It
-needs SQL Memory (`LOOMCYCLE_SQLMEM_ENABLED=1`) and `tenant` in **both**
-`memory_scopes` and `sql_scopes` of any agent that works on it.
+needs SQL Memory (on by default with SQLite; with Postgres only when
+`LOOMCYCLE_SQLMEM_PG_DSN` is set — see [document.md](document.md)) and `tenant` in
+**both** `memory_scopes` and `sql_scopes` of any agent that works on it.
 
 ---
 
@@ -74,10 +80,11 @@ with `include_retired`).
 
 | Method | Written by |
 |---|---|
-| `manual` | `link_chunks`, and `propose_statement` without a method: a person's or a model's own write |
+| `manual` | `link_chunks`, and `propose_statement` without a method, by a **person outside a run** |
+| `agent` | the same ops from **inside a run** (v1.142.0): a model's or code's own write, the run's agent as `actor`. In the tenant scope it is filed `proposed` unless the agent holds `statement_methods: [link]` — as are a run's fact `relation`, `import_md` / `import_canvas` edges and statements a copy or move carries in. A review-policy rule for `method:manual` no longer matches a run's proposals |
 | `wikilink` | a `[[name]]` link in a body |
 | `import` | `import_md` (its `loom-edges` block, and an edition's `amends`) |
-| `sync` / `canvas` | a link pulled by `sync` / `import_canvas` |
+| `sync` / `canvas` | a link pulled by `sync` (arrives `proposed` unless the source is `trust: asserted`) / `import_canvas` |
 | `runtime` / `consolidator` | the runtime's own links / a fact's `relation` |
 | `ontology` | a relation the ontology's Instances section declares |
 | `rule:<name>` / `extractor:<name>` | a code agent holding `statement_methods`; code found it, or a model the code drives found it |
@@ -92,9 +99,9 @@ quote}` (a chat turn), or `{scope, natural_key, quote}` (another scope's fact, k
 written and never ground for a verdict). For a chunk or a chat turn the server finds the
 quote at write time and records `char_start` / `char_end`; **a quote that does not
 occur is refused** (`evidence_quote_not_found`), never stored.
-- A quote is at most 4,000 characters; a statement keeps at most 32 rows
-  (`LOOMCYCLE_DOCUMENT_EVIDENCE_MAX_PER_EDGE`), past which a write reports
-  `evidence_capped: true`.
+- A quote is at most 4,000 characters; a statement keeps at most 32 rows (a
+  fixed limit since v1.153.0), past which a write reports `evidence_capped: true`.
+- `part: "title"` (v1.144.0) quotes a chunk's **title** instead of its body.
 - A row whose source the caller may not read is withheld from every answer.
 - `stale: true` marks a quote no longer in its source.
 
@@ -106,11 +113,12 @@ that does not fit is refused; every other writer's statement is filed with
 
 | Act | Who | How |
 |---|---|---|
-| assert a relation | anyone with `link` on both ends | `link_chunks` (refuses a `method`) |
+| assert a relation | anyone with `link` on both ends — from a run in the tenant scope only with `statement_methods: [link]` (else it is filed `proposed`) | `link_chunks` (refuses a `method`) |
 | propose a relation | anyone with `propose` | `propose_statement` (an existing proposal gains the evidence; an asserted one is refused `statement_asserted` — pass its `id` to propose a correction beside it, `attributes.revision_of`) |
-| accept / reject one | anyone outside a run: an operator, or a member (in its own user scope; in the tenant scope only with `review`) | `accept_statement`, `reject_statement` (needs a `reason`) — MCP `document`, or `POST /v1/_document` |
-| rule in bulk | operator, or a member with `review` | MCP `review` (below) |
+| accept / reject one | never a run. The operator plane in any scope of its tenant; a member or isolated user in its own user scope; a member in the tenant scope only with `review` on the statement's from-document. Another user's scope is the operator's | `accept_statement`, `reject_statement` (needs a `reason`) — MCP `document`, or `POST /v1/_document` |
+| rule in bulk | operator plane, or a member with `review` (tenant scope or its own user scope) | MCP `review` (below) |
 | upkeep (verify, expire, demote, merge, re-point evidence, flag) | a code agent with `statement_methods: [rule\|extractor]`, or an operator session | `maintain_statement` |
+| mark an import's source gone | the same | `mark_source` |
 | record a judge's verdicts | a code agent with `statement_methods: [judge]` | `judge_statements` |
 
 - **Access-control actions on documents** (v1.128.0 / v1.133.0): `link` covers
@@ -120,11 +128,20 @@ that does not fit is refused; every other writer's statement is filed with
   `review` is held only by a rule that names it — no member baseline grants it and it
   implies nothing else. A principal with only `read` + `propose` cannot add evidence
   to an asserted statement.
-- **v1.134.0:** a tenant **member's** single `accept_statement` / `reject_statement`
-  in the tenant scope needs the `review` grant on the statement's from-document, as a
-  bulk ruling does (an unknown id gets the same refusal). Operators, admins, the legacy
-  token, open mode and a member's own user scope are unchanged. A ruling also needs
-  `link` on both ends; of two concurrent rulings the second gets `statement_changed`.
+- **Operator plane vs member (v1.140.0).** The operator plane is an admin, the
+  legacy token, open mode or a `substrate:tenant` token in its own tenant, calling
+  from **outside a run**. Only it confirms the ontology, writes the review policy,
+  defines a tenant-wide type, rules in another user's scope, holds a lease outside
+  its own user scope, and grants `statement_methods`. A member's single ruling in
+  the tenant scope needs `review` on the statement's from-document (v1.134.0; an
+  unknown id gets the same refusal). A ruling also needs `link` on both ends; of
+  two concurrent rulings the second gets `statement_changed`.
+- **A ruling respects relation characteristics** (v1.154.0). Accepting — by hand,
+  in bulk, by policy or by the judge — runs the `@functional` / `@asymmetric`
+  checks `link_chunks` runs, refusing with **`characteristic_violation`** (the
+  statement stays proposed). Accepting a correction (a proposal with
+  `attributes.revision_of`) retires the original in the same write; reverting the
+  ruling restores both.
 - **Operator rulings survive machine paths.** A reimport, a sync pull, a run's upkeep
   and a fact's retirement never undo an operator's ruling or retire a person's
   statement. A `manual` statement — and a ruled one, from inside a run — takes only
@@ -148,12 +165,15 @@ means. An ontology with no sections reads as before (v1.128.0).
 | `@section instances` | the real organisations, units and posts, adopted as subjects on confirm |
 | `@section review` | the review policy (v1.133.0, see Review) |
 
-**A draft governs nothing.** Until an operator confirms it — Web UI → Settings →
-Ontology (one tab per section since v1.129.0), or `POST /v1/_ontology` — only the
-standard classes apply, `classify` classifies nothing, `extract_citations` finds
+**A draft governs nothing.** Until the operator plane confirms it — Web UI →
+Settings → Ontology (one tab per section since v1.129.0), or `POST /v1/_ontology`;
+a member cannot, since v1.140.0 — only the standard classes apply, `classify` classifies nothing, `extract_citations` finds
 nothing and no review policy runs. Revise the confirmed document **in place**:
 replacing it with a new document gives every concept a new chunk, so filed statements
-point at the old concepts and the next classify files duplicates.
+point at the old concepts and the next classify files duplicates. Since v1.140.0
+the ontology's document id is recorded and every reader resolves by it, so moving
+the `/memory/ontology` name onto another document does not swap the vocabulary;
+that name, `/memory/entities` and `/memory/tenant_root` are the operator's.
 
 ```markdown
 # Tenant Ontology
@@ -228,6 +248,8 @@ resolve: work_key=law:{number}
 | `@definitions <re>` | chunk titles of definitions passages; `get_chunk` / `query_chunks` mark them `definitional: true` |
 | `@boilerplate <re>` | (v1.129.0) paragraphs no relation is drawn from; one line per kind, joined as alternatives; `get_chunk` reports `boilerplate: [[start, end], …]` rune spans |
 | `@exclude` | listed among a class's directives by `describe_ontology` |
+| `@norm` | (v1.148.0) marks a document class — and its subclasses — as a norm; `describe_ontology` reports `norm_classes`, and the links agent's L4 compares against them by default |
+| `@annotate <slot>; <slot>` | (v1.148.0) the slots a class's annotations fill ("the problem; the decisions taken"); the root field `annotation_language` fixes one language for all annotations |
 
 **Grammar chunks** (`grammar:<name>`, in the classes section) are lines:
 - `pattern: <regex>` and `resolve: work_key=…, anchor=…, kind=…` — a citation's
@@ -258,14 +280,19 @@ documents it governs. A grammar that cannot be read carries an `issue` and is di
   **`concept_prefix`**: in the tenant scope a chunk matches through a live `subject`
   statement to the concept; in a user or agent scope, by carrying the concept's tag
   (`filter.applied.concept_matched_by` says which). File-plan `@retention` and `@acl`
-  are parsed and shown, **not enforced**.
+  are parsed and shown, **not enforced**: **`effective_policy`** (v1.151.0,
+  `document_id`) reports what they come to for one document — its concepts (via
+  an accepted `subject` / `classified_as` statement, or a tag outside the tenant
+  scope), the longest retention, every required group, and `issues` — always
+  with `enforced: false`. `describe_ontology` adds each concept's effective
+  retention and groups and a `policy` block.
 - **Instances** (`@a <class>`, `@alt <label>`) are adopted into the entity registry
   **on confirm**, under the key the memory consolidator uses, and announced `adopted`
   on `memory/subjects`. An instance without a declared class is never adopted.
 
 **`describe_ontology`** (Document op; ignores `scope`) returns what is **in force** as
 data: `{exists, status, confirmed, version, sections, partial?, classes, relations,
-grammars, schemes, instances, review?, issues?}`. Read it before writing into an
+grammars, schemes, instances, norm_classes, policy?, review?, issues?}`. Read it before writing into an
 unfamiliar knowledge base and after every confirm, and check `issues`. Agents suggest
 additions with `propose_entity` (`section: relations | schemes | instances`) and
 `propose_subject`; an agent never edits the ontology document.
@@ -314,7 +341,10 @@ document is, from the **confirmed** ontology, in up to three steps reported in `
 2. **Neighbourhood vote** (no model, needs an embedder): readable, already-classified
    documents most like this one in the same Path folder.
 3. **Model** (`memory.classifier`), only when the class is still open: a decision model
-   first, a chat model when there is none or it is unsure. Always a proposal.
+   first, a chat model when there is none or it is unsure. Always a proposal. With
+   more than 20 concepts (v1.138.1) it asks the concept tree **level by level** — the
+   top concepts, then the children of each yes, at most 20 a call and 12 calls —
+   and keeps the most specific yes on each branch.
 
 Exactly **one class matched by rule is applied** (type, identity fields, an
 `issued_by` to an adopted instance). Everything else is a proposal kept in the root's
@@ -322,7 +352,9 @@ Exactly **one class matched by rule is applied** (type, identity fields, an
 `classified_as` and `issued_by` statements. A type set by hand is never replaced
 (`kept`); `write: report` writes nothing. **`accept_classification`** is the operator's
 ruling (refused inside a run; `nothing_pending` if none). Since v1.134.0 a concept tag
-decided by the vote is **not** `rule:matched`.
+decided by the vote is **not** `rule:matched`. Operational documents (root type
+`SourceStub`, `SyncReport`, `Annotation`) are `skipped` — they are not knowledge, and
+the linker and judge skip them too.
 
 ```yaml
 memory:
@@ -350,7 +382,8 @@ the classifying run under usage purpose `classify`.
 | `rulings` | past rulings and reverts, newest first | `limit` (20, max 100), `after` |
 | `apply_policy` | runs the ontology's Review section over the waiting queue | `filter` (status only `proposed`), `dry_run`, `expect_count`, `max` |
 
-Common: `scope: tenant` (default) or `user` with `scope_id`; `tenant` (admin only).
+Common: `scope: tenant` (default) or `user` — a member its own; another subject's
+`scope_id` is the operator plane's; `tenant` (admin only).
 Filters include `kind(s)`, `method` (exact prefix), `actor`, `document_id`,
 `under_path`, `from_/to_document_id`, `from_/to_under_path`, `min_confidence`,
 `created_before/after` (unix ns or RFC 3339), `has_judge_verdict`, `judge_verdict`,
@@ -368,9 +401,12 @@ selecting exactly that group: pass it to `rule` unchanged.
    with `rulings`) to `revert`.
 
 Each statement is ruled exactly as the single op would rule it, with a per-item result
-(`not_a_proposal`, `statement_changed`, `not_found`, `failed`). Every real call writes
-one audit record (`statement_ruling`, `statement_ruling_revert`,
-`statement_policy_ruling`) to `LOOMCYCLE_AUDIT_LOG_PATH`. Refusal codes everywhere:
+(`not_a_proposal`, `statement_changed`, `not_found`, `failed`; an acceptance can also
+fail `characteristic_violation`). A bulk ruling rules only a statement still in the
+status its selection read, and a bulk accept by `ids` never reverses a rejection
+(v1.148.0; use `filter.status: rejected` for that). Every real call writes one audit
+record (`statement_ruling`, `statement_ruling_revert`, `statement_policy_ruling`) to
+the audit trail (and the `LOOMCYCLE_AUDIT_LOG_PATH` mirror when set). Refusal codes everywhere:
 `invalid_request`, `forbidden`, `queue_changed`, `ruling_not_found`, `unavailable`.
 
 **Who:** an admin, or a tenant operator in its own tenant (`write` on the
@@ -433,6 +469,12 @@ to **`judge_statements`**. The op, not the agent, decides:
   `not_found`;
 - all rulings of one run are **one ruling**, undone together by `review op=revert`.
 
+**Topics `classify` proposes** (v1.139.1). A classifier model's `subject` proposal
+carries no quote; the judge now rules on it from the document's **opening** (root
+and first sections, about 2,000 characters) beside the topic's meaning, instead of
+skipping it as `no_evidence`. Any other proposal without evidence is still skipped.
+So a policy line `judge kind:subject method:classify` now actually gets verdicts.
+
 **Sampled audit:** each run marks a share of its acceptances (`judge_audit`, default
 0.1, at least one) `attributes.judge.audited: pending`. Find them with `review op=queue`
 `filter: {status: asserted, judge_audit: pending}`; `accept_statement` **confirms**,
@@ -491,19 +533,155 @@ hide part of the scope from reading; the result's `not_announced` says why.
 
 ---
 
+## Annotations — briefs and abstracts (v1.148.0)
+
+An **annotation** is two short texts *about* one part of the tenant knowledge base: a
+**brief** (one sentence, ≤240 characters, for choosing) and an **abstract** (one
+paragraph, ≤2000, standing in for reading). Three levels: `branch` (a section with
+parts of its own, or a long one), `document` (on the root chunk) and `path` (a Path
+folder, kept on a `<folder>/_annotation` document of type `Annotation`, made on the
+first write). They are kept **beside** the content — writing one changes no body,
+history, export or sync — and only in the **tenant scope**.
+
+| Op | Who | Does |
+|---|---|---|
+| `annotation_inputs` | operator plane, or a code agent with `statement_methods: [annotate]` | what the target's annotation is written from (its text, its children's annotations, its identity, relations for a document) and `inputs_sha256` |
+| `set_annotation` | the same | writes `brief` + `abstract` with that hash; refused `annotation_inputs_changed` if the text moved. The operator may write by hand with `manual: true` (no hash, never overwritten by the pass) |
+| `get_annotation` | any reader | a chunk's / document's / folder's records, each with `stale` computed now |
+| `list_annotations` | any reader | pages filtered by `level`, `document_id`, `under_path`, `stale`, `manual`; `summarize: true` counts per level |
+| `delete_annotation` | operator plane; the grant for driver-written ones | removes one record (`level` required) |
+
+- **Bottom-up and only what changed.** The hash covers a part's own text and its
+  children's annotations, so a change climbs exactly as far as the text changed; a
+  record whose inputs changed reads `stale: true` and is still shown, marked.
+- **Repairs on write** (v1.152.0), reported in `repaired`: a code of the class's
+  `@identifier_pattern` shape that is not the document's own (`identity_mismatch`), and
+  a folder brief that only repeats the folder name or is under 20 characters.
+- **A folder's annotation is withheld** from a caller who may not read every document
+  it covers.
+- **Reading them:** `with_summary: true` on `get_document`, `get_chunk`, `search`,
+  `related`, `graph_recall`, `documents_summary`, `query_documents` and Path `ls`; `search`
+  `annotations: "include"` fuses them with passages, `"only"` (with `annotation_levels`,
+  e.g. `["path","document"]`) answers a question about the corpus as a whole. **`lineage`**
+  (`id`, a chunk) steps up from a hit: its sections, document and folders, each with its
+  brief, in one call.
+- **The ontology's say:** `@annotate` slots per class, `annotation_language` on the root.
+- **Written by** `kb/annotator` (below). The prompt version moved to 2 in v1.152.0 and
+  relation naming changed in v1.149.0 — each made every affected annotation stale once,
+  so run the annotator with `write: report` first to see the cost.
+
+---
+
+## Finding things in a knowledge base
+
+- **`search` `facets`** (v1.153.0) — `["type","folder","concept"]` counts the
+  documents behind the nearest matches (`facet_window` chunks, default 100, at most
+  500) per class, folder and ontology concept, with `complete`. Many documents in
+  several folders means the top hits are not the whole answer. Details in
+  [document.md](document.md).
+- **`query_documents`** by `title_contains`, `created_after` / `created_before`
+  (v1.153.0), for a document known by name.
+- **Cite answers** as `[title](loom:doc/<id>)` / `[title](loom:chunk/<id>)` (v1.138.0,
+  help topic `Document/citing`).
+- **Read-only agents — `tool_modes`** (v1.153.0). On an agent definition,
+  `tool_modes: {Document: read, Path: read}` holds those tools to their read ops: a
+  write is refused before it runs, at dispatch and in the tool. It is authority, not
+  content (outside the content signature), carries down the spawn tree, and a fork
+  may add a read mode but never remove one; since v1.154.0 it holds across the
+  agent's whole version history. Give it to anything that reads untrusted document
+  text.
+
+```yaml
+agents:
+  kb/reader:
+    tools: [Document, Path]
+    tool_modes: { Document: read, Path: read }
+```
+
+---
+
+## Sources that keep changing — provenance, removals, duplicates
+
+An imported document records where it came from (`provenance` on the root, a
+`source/<kind>` tag). Since v1.144.0 imports also take `source.revision` and
+`source.updated_at` (and kind `skybits`), and a **re-import refreshes the provenance**
+as a revision of the root, so `history` / `get_version` / `diff` show earlier ones.
+
+- **`mark_source`** (v1.144.0) — `{id | path, status: present | removed | trashed}`
+  records that the source no longer holds the document **instead of deleting it**:
+  `source_status` in its provenance and the tag `source/removed` while gone (filter
+  on it). Never touches a body; refused on a document that was never imported
+  (`not_imported`). Operator plane, or a run whose agent holds `statement_methods`
+  `rule` or `extractor`.
+- **`find_duplicates`** (v1.143.0) — over `document_ids` / `under_path(s)` (≤5000), no
+  model: `sha256` (same normalised text, confidence 1.0) and `title` (same title once
+  `Copy of `, ` (1)`, ` - Copy`, … are stripped, same kind; 0.7). Each copy points at
+  its original (in a title match where only one title has a copy marker, that one
+  is the copy; otherwise the earlier by `source_updated_at`, then creation). A **report** unless `propose: true`, which files
+  one `duplicate_of` proposal per pair, both titles quoted as evidence (`part:
+  "title"`). A pair already joined by `duplicate_of` in any status is skipped. Nothing
+  is merged, hidden or deleted — a reviewer decides.
+- **`effective_policy`** (v1.151.0) — the retention and groups a document's file-plan
+  concepts declare; reported, never enforced (see Schemes above).
+
+### The `skybits-sync` bundle (v1.145.0)
+
+Keeps tenant Documents under a Path root (`/skybits` by default) in step with one
+Skybits account: `skybits/sync` (code-js, `statement_methods: [rule]`) lists and
+diffs the account, `skybits/import` imports one item (OCR for images, speech-to-text
+for recordings), `skybits/structure` (tier `middle`) proposes headings. Edits re-import
+into the same document; removed or trashed items get `mark_source`; copies become
+`duplicate_of` proposals; items that cannot be text get a `SourceStub`, and each run
+adds to a monthly `SyncReport`. It only reads the account. It needs an MCP server
+named **`skybits`** in the tenant (an `oauth` credential), SQL Memory, and an
+overlay giving `skybits/sync` and `skybits/import` `memory_scopes` / `sql_scopes:
+[tenant]`. Start with `{"mode":"plan","full":true}`, then `{"mode":"apply"}`; it
+installs no schedule. See the runtime's `bundles/skybits-sync/README.md`.
+
+---
+
 ## The knowledge-base bundle
 
 ```bash
-LOOMCYCLE_CODE_AGENTS_ENABLED=1 LOOMCYCLE_SQLMEM_ENABLED=1 \
-  LOOMCYCLE_PRESETS=base,knowledge-base loomcycle
+LOOMCYCLE_PRESETS=base,knowledge-base loomcycle    # or presets: [base, knowledge-base] in the yaml
 ```
 
-| Agent | Provider | Role |
+Code agents are always on since v1.153.0 (the old switch is retired), so `code-js`
+is registered whenever the config declares it — the default providers layer does.
+
+| Agent | Provider / tools | Role |
 |---|---|---|
-| `kb/linker` | code-js, `tools: [Document, Agent, Channel]`, `statement_methods: [rule, extractor]` | builds and maintains statements by rule |
-| `kb/verdict` | tier `low`, `tools: []` | one bounded relation verdict per call (L4, L5, rejudge) |
-| `kb/judge` | code-js, `tools: [Document, Agent]`, `statement_methods: [judge]` | rules on proposals routed to the judge |
-| `kb/judge-verdict` | tier `middle`, `tools: []` | one accept / reject / unsure per proposal |
+| `kb/linker` | code-js; `Document`, `Agent`, `Channel`, `Context` (time only); `statement_methods: [rule, extractor]` | builds and maintains statements by rule |
+| `kb/verdict` | tier `low`, no tools | one bounded relation verdict per call (L4, L5, rejudge) |
+| `kb/judge` | code-js; `Document`, `Agent`; `statement_methods: [judge]` | rules on proposals routed to the judge |
+| `kb/judge-verdict` | tier `middle`, no tools | one accept / reject / unsure per proposal |
+| `kb/annotator` | code-js; `Document`, `Agent`, `Channel`; `statement_methods: [annotate]` | writes annotations bottom-up (above) |
+| `kb/annotate` | tier `middle`, no tools | one part in, `{brief, abstract, language}` out |
+| `kb/ask` | code-js; `Decision`, `Agent` | **the one entry point for a question** (below) |
+| `kb/classify` | tier `low`, no tools | is this an overview question? `YES` / `NO` |
+| `kb/search` | tier `middle`; `Document` read-only | flat search with summaries; ends `COVERAGE: complete \| partial` |
+| `kb/survey` | code-js; `Document` read-only, `Agent` | answers overview questions ("what do we hold on X") |
+| `kb/screen` | tier `middle`; `Document` read-only | sorts one slice of the survey's candidates by their briefs |
+| `kb/walker` | tier `middle`; `Document`, `Path` read-only | composes the survey's reply; walks the tree by summaries after a partial search |
+
+**Asking — `kb/ask`** (v1.153.0, routing refined through v1.156.0). A request for *the*
+overview, guide or full picture of one known thing goes straight to `kb/search`
+(v1.156.0). Otherwise it asks a decision model whether the question wants an
+overview (`kb/classify` when the score is in between or the call fails): an overview
+runs **`kb/survey`** (v1.155.0), anything else `kb/search`, and a search that reports
+partial coverage or did not complete goes on to `kb/walker` with the ids found,
+unless the request was a known-item lookup (it keeps its partial answer) or the
+classifier said no (a decision score of 0.1 or less, or `kb/classify`'s no). The
+question travels to each child by reference, still untrusted; the caller's trusted
+framing ("answer in one paragraph") is forwarded beside it (v1.154.0).
+`kb/survey` gathers candidates in code (several searches, one per clause, one hop of
+relations; at most 120 documents, plus up to 24 sections of large guides), has
+`kb/screen` sort them by their briefs in slices of 12 — ids only, never text — and
+`kb/walker` compose the answer; code writes the `COVERAGE` line, `complete` only when
+every candidate was sorted, none was cut, and the facet count was reached.
+`kb/walker` alone widens an overview until the facet counts are covered (v1.154.0).
+An overview costs five to seven times a lookup. The readers hold their tools
+read-only (`tool_modes`), so a stored document cannot talk them into writing.
 
 **Linker input** (the run prompt, a JSON object; an unknown field refuses the run):
 
@@ -517,10 +695,20 @@ LOOMCYCLE_CODE_AGENTS_ENABLED=1 LOOMCYCLE_SQLMEM_ENABLED=1 \
 
 **Layers:** L0 `classify` (and with `file: {root}`, a name under `<root>/<Class>/`); L1
 anchors (report only); L2 citations from the class's citation grammar (`rule:citation`);
-L3 `uses_term` / `defines` from the `terms_scheme` (tenant scope only); L4 semantic
-`elaborates` proposals by `extractor:relate` (opt-in); L5 check-against, a report
-document, never statements (opt-in); L6 upkeep. L0, L2 and L3 need a confirmed ontology
-(L2/L3 with relation kinds). `uses_term` is not a seed kind — declare it.
+L3 `uses_term` / `defines` from the `terms_scheme` (tenant scope only); L4 relate
+(opt-in, `extractor:relate`); L5 check-against, a report document, never statements
+(opt-in); L6 upkeep. L0, L2 and L3 need a confirmed ontology (L2/L3 with relation
+kinds). `uses_term` is not a seed kind — declare it.
+
+**L4, narrowed to what measured true** (v1.148.0). It files only kinds the tenant
+ontology declares itself; `elaborates`, `conflicts_with` and `stricter_than` are
+**reported, never filed** (and `implements` / `alternate_of` stay report-only). It
+compares against the **`@norm`** classes by default (`target_types` overrides;
+`target_types_from` says which applied), drops the document's own copies and
+versions (the `find_duplicates` rule plus `duplicate_of` / `revision_of` / … relations),
+skips headings, contents lines, legends, short passages and quotes, and stops between
+verdicts at `time_budget_seconds` (default 1500). A pass whose verdicts all fail ends
+`failed`. A tenant that forked `kb/linker` keeps its old code until it re-forks.
 
 **Write modes:** `report` (default) issues read ops only, takes no lease, acks nothing,
 and counts `would_write`. **Run it first.** `propose` takes the scope's `linker`
@@ -533,8 +721,9 @@ grant is a tenant write grant):
 
 ```yaml
 agents:
-  kb/linker: { memory_scopes: [tenant], sql_scopes: [tenant] }
-  kb/judge:  { memory_scopes: [tenant], sql_scopes: [tenant] }
+  kb/linker:    { memory_scopes: [tenant], sql_scopes: [tenant] }
+  kb/judge:     { memory_scopes: [tenant], sql_scopes: [tenant] }
+  kb/annotator: { memory_scopes: [tenant], sql_scopes: [tenant] }
 channels:
   documents/ingested:
     scope: tenant          # the bundle declares user; re-declare when documents live in the tenant
@@ -544,15 +733,20 @@ Then drain with `{"mode":"drain","scope":"tenant","queue":"documents","write":"p
 (v1.132.0). The bundle installs **no schedule**: add `scheduled_runs` in yaml or a
 ScheduleDef (MCP `scheduledef op=create` with an `overlay` naming `agent: kb/linker`,
 `schedule`, `concurrency_policy: forbid` and a `trusted-text` prompt holding the JSON
-input). Schedule `kb/judge` after the drain. Under `LOOMCYCLE_ACL=enforce` the starter
-needs `propose` on the documents, and `link` on both ends for `maintain` expire / demote
-/ merge.
+input). Schedule `kb/judge` and `kb/annotator` (`{"mode":"drain","write":"annotate"}`,
+plus a weekly `sweep`) after the drain. The annotator reads `documents/ingested`
+without acknowledging it — the queue's position belongs to the linker. Under
+`LOOMCYCLE_ACL=enforce` the starter needs `propose` on the documents, and `link` on
+both ends for `maintain` expire / demote / merge.
 
 **`statement_methods`** (agent definition, yaml or AgentDef): `rule`, `extractor`,
-`judge`. **code-js only** — refused at config load and at AgentDef create / fork for any
-other provider. A fork narrows, never widens; not per-run overridable; a sub-agent holds
-only its own grant; not part of `content_sha256`. A method outside the grant is
-`method_not_granted`. Without it every relation the agent writes is `manual`.
+`judge`, `annotate` — **code-js only**, refused at config load and AgentDef create /
+fork for any other provider — and, for any provider, `link` (a run's tenant
+relations are asserted rather than filed for review) and `remember` (a run may call
+`remember`), both v1.142.0. A fork narrows, never widens; not per-run overridable; a
+sub-agent holds only its own grant; not part of `content_sha256`. A method outside the
+grant is `method_not_granted`. Without it a run's relations are method `agent`. It is
+operator-grade: an agent a **member** authors must leave it unset (v1.140.0).
 
 ---
 
@@ -570,8 +764,26 @@ only its own grant; not part of `content_sha256`. A method outside the grant is
   minutes per scope). **`pg_hba` must admit the `sqlmem_dr_…` roles** wherever it lists
   `sqlmem_r_…` roles individually. `query_chunks` raw `sql` now runs as the Document role
   and cannot read the agent's own tables.
+- **SQLite document plane** (v1.142.0): each scope's Document tables move once, at
+  the first boot, into their own `<scope>.doc.db` beside `<scope>.db`, so agent SQL
+  cannot reach them. **Back up every `*.db` under the sqlmem root first**; rolling
+  back past v1.142.0 needs that backup.
 - **Snapshot before upgrading** to v1.128.0+: `POST /v1/_snapshot` includes SQL Memory;
   a non-superuser `pg_dump` cannot capture it, and the upgrade rewrites it.
+- **Settings (v1.153.0):** SQL Memory and code agents are no longer switched on by
+  environment variables (`LOOMCYCLE_SQLMEM_ENABLED`, `LOOMCYCLE_CODE_AGENTS_ENABLED`
+  and the evidence-cap variable are retired — still set, `loomcycle validate` and the
+  boot name them, and refuse those that disagree with the new behaviour). On Postgres
+  set `LOOMCYCLE_SQLMEM_PG_DSN` or Documents are off. Run `loomcycle validate` /
+  `doctor` from the new binary before the real start.
+- **Who decides changed in v1.140.0:** a member no longer confirms the ontology,
+  writes the review policy, rules outside its own user scope (bar a `review` grant in
+  the tenant), holds the tenant lease, or authors agents with `statement_methods`.
+  Leases the old shared owner held expire on their TTL.
+- **Run relations changed in v1.142.0:** a run's tenant relations and pulled `sync`
+  links arrive `proposed` unless granted `link` / declared `trust: asserted`; a run's
+  `remember` needs the `remember` grant; a run's proposals are method `agent`, so a
+  policy rule written for `method:manual` no longer matches them.
 - **Upgrade all replicas together:** an older replica writes documents into the agent
   schema, and those writes are dropped once a newer replica moved the scope.
 - **Legacy-token deployments:** an ontology confirmed on the Settings page before
@@ -581,7 +793,11 @@ only its own grant; not part of `content_sha256`. A method outside the grant is
   document can at worst get one proposal accepted, bounded by the floor, the policy's
   kinds, the one-ruling undo and the audit sample.
 - **Reload the plugin after upgrading the runtime**: the `review` and `ontology` tools
-  and new `document` fields appear only in a fresh `tools/list`.
+  and new `document` ops and fields (annotations, `lineage`, `facets`, …) appear only
+  in a fresh `tools/list`.
+- **The question agents read document text:** they hold `Document` / `Path`
+  read-only (`tool_modes`), and `kb/survey` hands its children ids, never text, so a
+  hostile document cannot steer a write or reach a trusted prompt.
 
 ---
 
@@ -594,16 +810,24 @@ only its own grant; not part of `content_sha256`. A method outside the grant is
 | `statement_asserted` | the relation already holds | propose a correction with its `id`, or `judge_fact` it |
 | `kind_reserved` / `attribute_reserved` | a runtime-only kind or attribute | use a tenant kind; drop `judge` / `review_route` / `classified_by` |
 | `method_not_granted` | no `statement_methods`, or not code-js | grant `[rule, extractor]` on a code-js definition |
-| linker `propose` run fails at its lease | missing method grant | as above; check `LOOMCYCLE_CODE_AGENTS_ENABLED=1` |
+| linker `propose` run fails at its lease | missing method grant | as above; the config must declare a `code-js` provider (the default providers layer does) |
 | L2 / L3 `skipped` | ontology draft, or no Relations section | add relation kinds and confirm |
 | L3 counts `hits_no_kind` | `uses_term` not declared | add `### uses_term` under Relations |
 | drain `failed`, `scope_mismatch` | channel scope differs from the drain's | re-declare `documents/ingested` `scope: tenant` (or drain at `user`) |
 | `queue_changed` (409) | queue moved between dry run and real call | dry-run again, pass the new `matched` |
-| member gets `forbidden` ruling | no `review` grant on the from-document path (single rulings too since v1.134.0) | bind an ACL rule with action `review`, plus `read` |
+| member gets `forbidden` ruling | no `review` grant on the from-document path (single rulings too since v1.134.0), or another user's scope | bind an ACL rule with action `review`, plus `read`; another user's scope is the operator's |
+| `characteristic_violation` on accept | the acceptance would break `@functional` / `@asymmetric` (v1.154.0) | retire the existing statement, or propose a revision of it |
+| a run's `link_chunks` in the tenant comes back `proposed` | no `statement_methods: [link]` (v1.142.0) | grant `link`, or rule on the proposals |
+| `remember` refused inside a run | no `statement_methods: [remember]` | grant it, or `upsert_chunk` with a real `source_quote` |
+| every Document op refused on Postgres | SQL Memory off: no `LOOMCYCLE_SQLMEM_PG_DSN` (boot `WARN`) | set the DSN of a separate database |
+| `annotation_inputs_changed` | the text moved between read and write | read `annotation_inputs` again |
+| `set_annotation` refused | not tenant scope, or no operator plane / `annotate` grant | pass `scope: tenant`; run it from `kb/annotator` |
+| `mark_source` → `not_imported` | the document was never imported with a source | nothing to mark |
+| `kb/ask` answer says `COVERAGE: partial` | the candidates outnumbered the cap, or a slice failed | narrow the question or the folder; read `UNCOVERED` |
 | `apply_policy` → `invalid_request` | no confirmed ontology, or Review section issues | `describe_ontology`, fix `issues`, confirm |
 | policy rules nothing | `review.applied: false` — one bad line voids the policy | fix the line; check `issues` |
 | concept tags stopped auto-accepting (v1.134.0) | vote-decided tags are not `rule:matched` | rule on them, or route them to `judge` |
-| ontology edits have no effect | still a draft | confirm in Settings → Ontology or `POST /v1/_ontology` |
+| ontology edits have no effect | still a draft | confirm in Settings → Ontology or `POST /v1/_ontology` (operator plane) |
 | `ontology` tool missing from the session | token lacks `substrate:tenant`, or a stale tool list | use an operator token; reload the plugin |
 | `principal_not_found` on bind | the user has no row in the tenant | `POST /v1/_users`, then bind |
 | `principal_conflict` on merge | the two subjects are bound to different users | clear one binding first |
