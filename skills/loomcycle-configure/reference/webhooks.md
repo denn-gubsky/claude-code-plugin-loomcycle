@@ -8,7 +8,7 @@ secrets through **two different mechanisms** (webhook secret-resolution rules
 vs. the `${}` interpolation allowlist), which is the #1 thing operators conflate.
 Authoritative source: the loomcycle help topics `input-webhooks` and
 `dynamic-mcp` (`Context op=help topic=…`) + `docs/CONFIGURATION.md` +
-`internal/config/config.go` (checked against loomcycle **v1.107.0**). Field names
+`internal/config/config.go` (checked against loomcycle **v1.156.0**). Field names
 below match the config loader. The version notes that mention v0.23.x binaries
 are history; skip them on a current runtime.
 
@@ -29,11 +29,14 @@ signs and POSTs an event; loomcycle **spawns an agent run**
 agent (`delivery: channel`), or **starts a team walk** (`delivery: team`,
 v1.104.0). Verify-before-parse, fail-loud, retry-safe.
 
-### Enable
+### Always on (v1.153.0)
 
-```bash
-LOOMCYCLE_WEBHOOKS_ENABLED=1      # off by default
-```
+The receiver is **always mounted** since v1.153.0; there is nothing to enable.
+A webhook answers while its definition exists, so to keep the receiver unused,
+keep no webhook definitions. (Before v1.153.0 it was off unless the operator
+set `LOOMCYCLE_WEBHOOKS_ENABLED=1`; that variable is retired — any value but `1`
+refuses the boot. **On upgrade, list every tenant's webhook definitions:** one
+authored while the receiver was off starts answering at the first boot.)
 
 The receiver mounts at **`POST /v1/_webhooks/{name}`**. The boot log confirms
 it with a line starting `webhooks: enabled (POST /v1/_webhooks/{name} …` that
@@ -202,9 +205,9 @@ resolves to empty + a trace note — never a hard failure.
 > the author's tenant and may name only that tenant unless the author is an
 > admin; the operator's yaml may name any tenant.
 
-### Per-tenant route (v0.24.0, RFC N wire change)
+### Per-tenant route (v0.24.0 wire change)
 
-v0.24.0 extended the RFC N tenant axis to webhooks (and all 8 def families).
+v0.24.0 extended the tenant axis to webhooks (and all 8 def families).
 A webhook authored under a **non-empty tenant** is reached at
 **`POST /v1/_webhooks/{tenant}/{name}`** — the tenant is path-authoritative,
 resolved from the route, never the body. The bare-root
@@ -276,7 +279,8 @@ A team definition can also declare webhooks of its own (`local.webhooks`),
 reached at `POST /v1/_teams/{tenant}/{team}/webhooks/{name}` (or
 `/v1/_teams/{team}/webhooks/{name}` in the shared tenant). They answer only while
 a walk of that team is running, publish the body into one of the team's own
-channels, and need `LOOMCYCLE_WEBHOOKS_ENABLED=1` like any other.
+channels; like every webhook they need no switch (the receiver is always on
+since v1.153.0).
 
 ### Responses & triage
 
@@ -414,8 +418,11 @@ string `${GITEA_ACCESS_TOKEN}` and `401`s on every call. The allowlist (from
 > **Deny-list (v0.32.0, #462 / exp7-C2) — overrides the allowlist:** `PG_DSN`,
 > `LOOMCYCLE_PG_DSN`, `LOOMCYCLE_SQLMEM_PG_DSN`, `LOOMCYCLE_AUTH_TOKEN`,
 > `LOOMCYCLE_OPERATOR_TOKEN_PEPPER`, `LOOMCYCLE_MCP_UPSTREAM_TOKEN`,
-> `LOOMCYCLE_OTEL_EXPORTER_OTLP_HEADERS`, `LOOMCYCLE_SECRET_KEY` and
-> `LOOMCYCLE_SECRET_KEY_PREVIOUS` are **never** interpolated, even
+> `LOOMCYCLE_OTEL_EXPORTER_OTLP_HEADERS_FILE`, `LOOMCYCLE_SECRET_KEY`,
+> `LOOMCYCLE_SECRET_KEY_PREVIOUS`, the collector-header variables
+> (`OTEL_EXPORTER_OTLP_HEADERS` and its `_TRACES_` / `_METRICS_` / `_LOGS_`
+> forms) and the retired `LOOMCYCLE_OTEL_EXPORTER_OTLP_HEADERS` (a stale value
+> is still a live secret) are **never** interpolated, even
 > though the `LOOMCYCLE_` prefix would otherwise allow most of them — they are
 > loomcycle's own DB/admin credentials, and expanding them into an outbound MCP
 > URL/header would leak infra creds to a third party. (Earlier drafts of this doc

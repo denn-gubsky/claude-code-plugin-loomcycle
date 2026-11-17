@@ -15,7 +15,7 @@ do; it never adds a capability.
 > definition carries, plus any its run request or its team adds. A config or
 > script that still registers hooks must move them onto the agent.
 
-This page is the short form. The runtime serves the full article, matched to the
+Checked against loomcycle **v1.156.0**. This page is the short form. The runtime serves the full article, matched to the
 version you are connected to: call the `context` tool with
 `{"op": "help", "topic": "hooks"}`.
 
@@ -49,8 +49,9 @@ Three other places add hooks, and all three can only **add**:
   `POST /v1/runs`;
 - a team state's `hooks` / `tool_hooks`, added to every run that state starts;
 - a channel's `hooks.channel_publish`, which decide each message published to
-  the channel before any reader sees it (off unless the operator sets
-  `LOOMCYCLE_CHANNEL_HOOKS=1`).
+  the channel before any reader sees it. The channel-hook worker always runs
+  since v1.153.0 (before it, these needed a switch the operator set): a channel
+  that declares `hooks:` has them applied to every message.
 
 ## The events
 
@@ -90,8 +91,11 @@ it is used. Ops: `create` (which also promotes), `fork` (does not promote),
 ```
 
 - `body.kind` is `http` (a `url`) or `code-js` (a `code` body defining
-  `hook(ev)`). A code body is compiled when saved and **refused unless the
-  operator set `LOOMCYCLE_CODE_HOOKS_ENABLED=1`**.
+  `hook(ev)`). A code body is compiled when saved. **Code hooks are always
+  available since v1.153.0** — there is no switch, so anyone who may author a
+  hook definition in a tenant can run JavaScript in the loomcycle process,
+  bounded in time but not in memory. Control who may author hook definitions
+  (the access-control rules, [access-control.md](access-control.md)).
 - A code hook's only tool is `Interruption` (`ask`, `notify`), so it can ask an
   operator and decide on the answer. It runs in a sandbox with a 50 ms default
   time budget, 1 s at most.
@@ -121,4 +125,20 @@ it is used. Ops: `create` (which also promotes), `fork` (does not promote),
   definition. Never derive `allow_hosts` from the tool input: the URL the model
   wants is untrusted.
 - A tenant's hook webhook cannot reach a private address unless the operator
-  lists the host (`LOOMCYCLE_HOOKS_PRIVATE_HOST_ALLOWLIST`).
+  lists the host. Since v1.153.0 both operator lists are yaml only, and the yaml
+  list is the whole list (the environment variables that used to append to them
+  are retired):
+
+  ```yaml
+  hooks:
+    permit_host_widen:
+      owners: ["acme:url-gate"]      # [tenant:]hook-name; no tenant = shared
+    private_host_allowlist:
+      - 10.20.0.0/16                 # hosts (suffix-matched) or CIDR ranges
+  ```
+
+  Under `LOOMCYCLE_HTTP_PRIVATE_HOST_ALLOWLIST_MODE=cidr_only` every
+  `private_host_allowlist` entry must be a CIDR range. Since v1.147.0 a yaml
+  agent or channel that names a stored hook definition on a private address
+  also dials through the guard; only an inline webhook in the operator's own
+  yaml is not guarded.

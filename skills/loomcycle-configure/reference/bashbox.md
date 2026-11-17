@@ -1,4 +1,4 @@
-# Bashbox reference — RFC AJ (v1.3.0+; checked against v1.107.0)
+# Bashbox reference (v1.3.0+; checked against v1.156.0)
 
 `Bashbox` is a **TRUE in-process shell sandbox** — the isolated alternative to
 the `Bash` tool. It runs shell commands via [gbash](https://github.com/ewhauser/gbash)
@@ -7,10 +7,17 @@ bound volume, and there is **no network**. Where `Bash` is "restricted, not
 isolated" (it shells out via `os/exec`, leaking the host), Bashbox's isolation is
 real — so it can do something `Bash` can't: **honor read-only volumes**.
 
-Opt-in exactly like Bash, in two layers:
+**Always registered since v1.153.0.** An agent gets it by listing it:
 
-1. **`LOOMCYCLE_BASHBOX_ENABLED=1`** — the operator env flag (per deployment).
-2. **`tools: [Bashbox]`** — the per-agent gate.
+- **`tools: [Bashbox]`** — the per-agent gate, and the only one. It also needs a
+  bound volume (below).
+
+Before v1.153.0 the operator also had to set a deployment switch
+(`LOOMCYCLE_BASHBOX_ENABLED=1`, now retired: any value but `1` refuses the
+boot, `1` is only advised). Upgrading turns Bashbox on for every agent that
+already lists it — check which agents do. An agent **registered over MCP**
+(`register_agent`) has `Bashbox` stripped, like `Bash`, `Write` and `Edit`,
+unless the operator sets `LOOMCYCLE_MCP_ALLOW_PRIVILEGED_TOOLS=1`.
 
 Stateless per call (no shell state persists between invocations). Input:
 `command` (required; use paths relative to the volume root), `volume` (optional),
@@ -32,7 +39,7 @@ returned as an error with the output kept.
 | Read-only volume | **refuses** a `ro` volume (can't enforce it) | **honors** `ro` — writes hit an in-RAM overlay, never the host |
 | Host binaries | yes (real `/bin/sh`, `git`, `curl`, …) | only gbash builtins + bundled `awk`/`jq` (~97% `/bin/sh` parity); `git`/network absent by default |
 | Network | yes (subject to no tool-level guard) | **none** |
-| Enable | `LOOMCYCLE_BASH_ENABLED=1` + `tools:[Bash]` | `LOOMCYCLE_BASHBOX_ENABLED=1` + `tools:[Bashbox]` |
+| Enable | `LOOMCYCLE_BASH_ENABLED=1` + `tools:[Bash]` | `tools:[Bashbox]` (always registered since v1.153.0) |
 
 **Recommendation:** prefer **Bashbox** for untrusted prompts or read-only work
 (it's the sandbox `Bash` only pretends to be). Use **Bash** only when the agent
@@ -49,8 +56,8 @@ as the file tools; omitted → the agent's `default` volume.
 
 The key asymmetry: **Bashbox accepts a `ro` volume.** A `ro` binding mounts under
 an in-RAM write overlay, so a script's writes succeed *in-run* but never touch
-the host tree — the read-only guarantee RFC AH left open for `Bash` (which
-refuses `ro` rather than ship a false promise).
+the host tree — the read-only guarantee the volume model leaves open for `Bash`
+(which refuses `ro` rather than ship a false promise).
 
 ```yaml
 volumes:
@@ -67,14 +74,17 @@ agents:
 
 ---
 
-## Host-command fallback — RFC AJ §13 (operator opt-in, OFF by default)
+## Host-command fallback (operator opt-in, OFF by default)
 
 Commands gbash doesn't implement (`git`, `gh`, …) normally **fail** inside
 Bashbox. An operator can allowlist specific ones to fall through to the **real
 host shell**:
 
+These are **security gates**, so they stay in the environment (no yaml form, no
+preset can set them):
+
 ```bash
-# .env.insecure (names only — safe to commit/read; NOT secrets)
+# the non-secret env file (names only — NOT secrets)
 LOOMCYCLE_BASHBOX_FALLBACK_COMMANDS=git,gh
 # Credentials those host commands may see (injected into the host child, not the
 # sandbox env). The MODEL CAN STILL READ THEM: an allowlisted command can be told
@@ -122,7 +132,9 @@ value in any file (SKILL.md safety rule #2). The plugin never reads `.env.local`
 - **No network** without the fallback — agents that fetch should use the
   `HTTP`/`WebFetch`/`WebSearch` tools (host-allowlisted), not Bashbox.
 - Like every exec/file tool, Bashbox refuses entirely if the agent has **no**
-  volume binding (sandbox-by-default, RFC AH Phase 3).
+  volume binding (sandbox-by-default since v1.1.0).
+- **Memory per call** is bounded by `LOOMCYCLE_BASHBOX_OVERLAY_MAX_BYTES`
+  (default 64 MiB; the overlay writes and a shadowed `dynamic_root`).
 
 ---
 
@@ -138,9 +150,12 @@ either. Two operator options, traded off on isolation:
 | Builder-sidecar sandbox | Each session runs in a separate, ephemeral container (network off by default, read-only rootfs, resource caps). loomcycle drives it over HTTP-MCP: enable `LOOMCYCLE_PRESETS=base,sandbox,dev-exec`; the tools are `mcp__sandbox__sandbox_open` / `_exec` / `_write` / `_read` / `_close` / `_list` | Untrusted code, or a multi-tenant deployment |
 
 A headless browser for web-UI testing (`mcp__browser__*`) needs the runtime run
-as the `denngubsky/loomcycle-browser` image plus a `pinchtab/pinchtab` sidecar,
-and the sidecar sandbox also needs `LOOMCYCLE_CODE_AGENTS_ENABLED=1` for its
-`dev/exec` agent. Setup for all three is in the
+as the `denngubsky/loomcycle-browser` image plus a `pinchtab/pinchtab` sidecar.
+The sidecar sandbox's `dev/exec` agent is a code agent: code agents are always
+available since v1.153.0 wherever the config declares a `code-js` provider (the
+default providers layer does). File conversion (extraction, OCR, media) runs in
+conversion workers by default on Linux since v1.154.0, not in Bashbox — see
+[files.md](files.md). Setup for all three is in the
 loomcycle repo's `docs/TOOLBOX_IMAGE.md` and `docs/SANDBOX.md`.
 
 See the loomcycle `bashbox` `Context op=help` topic and `docs/TOOLS.md` for the

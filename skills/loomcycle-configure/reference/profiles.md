@@ -1,28 +1,51 @@
 # Deployment profiles
 
-Six postures on a **trust × scale** grid. Each is a preset of env vars (the
-posture axis) over the same `loomcycle.yaml` routing. Profiles are cumulative —
-5 layers on 4, 6 layers on 5. Pick the *lowest-trust* one that does the job.
+Six postures on a **trust × scale** grid, checked against loomcycle
+**v1.156.0**. Profiles are cumulative — 5 layers on 4, 6 layers on 5. Pick the
+*lowest-trust* one that does the job.
 
-Cross-check every var against [env-vars.md](env-vars.md); routing yaml lives in
+**Start from the two embedded profiles (v1.153.0).** loomcycle ships two
+presets that each stand for a whole installation, with ready files under
+`examples/profiles/` in the loomcycle repo:
+
+| Embedded profile | Layers | Postures here | Start with |
+|---|---|---|---|
+| `personal` | `base`, `local`, `chat`, `document-agent`; sets nothing itself (SQLite, SQL Memory on it, loopback are already the defaults) | 1, 2, 3 | `loomcycle init` (writes `presets: [personal]`), or `examples/profiles/personal/` |
+| `server` | `base`, `chat`, `document-agent`, `memory`; turns the metrics sampler on | 4, 5, 6 | `loomcycle init --profile server`, or `examples/profiles/server/` (with compose + Postgres) |
+
+Each posture below is that profile **plus** what you decide: environment
+switches (secrets, addresses, security gates) and yaml blocks (volumes, sign-in
+gates, retention, concurrency). Neither preset sets a volume, a sign-in gate,
+retention, a listen address or a secret, and **no preset can turn on a gate**
+(`LOOMCYCLE_BASH_ENABLED`, `LOOMCYCLE_HTTP_HOST_ALLOWLIST`, …) — those exist only
+in the environment. Where each setting lives: [settings.md](settings.md);
+every variable: [env-vars.md](env-vars.md); routing yaml:
 [routing.md](routing.md). **Print env lines for the operator — never write their
 env file.** Never put a secret value in any file.
 
-Things that changed under every profile since these were first written (current
-as of **v1.135.0**):
+Things that changed under every profile since these were first written:
 
-- **Filesystem access is a YAML `volumes:` block, not env.** The
-  `LOOMCYCLE_READ_ROOT` / `LOOMCYCLE_WRITE_ROOT` / `LOOMCYCLE_BASH_CWD` jail was
-  retired in v1.1.0 — setting any of them now **fails startup**. An agent bound
+- **Settings moved out of the environment (v1.153.0).** Storage backend, SQL
+  Memory, retention, concurrency, provider timeouts, timeout scaling and the
+  metrics sampler are yaml or inferred; seven feature switches (scheduler,
+  webhook receiver, channel hooks, code agents, code hooks, Bashbox, fan-out
+  resume) are gone because the features are always on. A deployment upgraded
+  from before v1.153.0 must run the [upgrade checklist](settings.md#upgrading-from-before-v11530--checklist)
+  first: some old lines refuse the boot, others change behaviour silently.
+
+- **Filesystem access is a YAML `volumes:` block, not env.** The retired
+  jail variables (`LOOMCYCLE_READ_ROOT` / `LOOMCYCLE_WRITE_ROOT` /
+  `LOOMCYCLE_BASH_CWD`, retired in v1.1.0) **refuse the boot** when set to a
+  non-empty value. An agent bound
   to no volume has no disk access. See [volumes.md](volumes.md).
-- **Routing can come from an embedded preset.** `LOOMCYCLE_PRESETS=base` supplies
-  the provider matrix, aliases and tiers; your own `--config` layers on top. The
-  YAML skeletons below assume that (or your own `tiers:` — see routing.md).
-  The agent tool-allowlist key is `tools:`. Two opt-in additions:
+- **Routing comes from the profile preset.** Your own yaml layers on top; the
+  YAML skeletons below assume `presets: [personal]` or `presets: [server]` in
+  the primary config file (`--preset` or `LOOMCYCLE_PRESETS` win over it). The
+  agent tool-allowlist key is `tools:`. Opt-in additions:
   `knowledge-base` (v1.128.0 — the `kb/linker` links agent for statements; see
   [knowledge-base.md](knowledge-base.md)) and `loomboard` (v1.127.0 — the
   loomboard app's sign-in client; see [identity.md](identity.md)), e.g.
-  `LOOMCYCLE_PRESETS=base,knowledge-base,loomboard`.
+  `presets: [server, knowledge-base, loomboard]`.
 - **Sign-in gate keys are strict (v1.130.0).** A misspelt or stale key under
   `auth.gates.<name>` or its `new_user` block now **fails the config load**.
   Run `loomcycle validate` over your config before upgrading to v1.130.0+.
@@ -57,32 +80,37 @@ There is no isolation; the trust boundary is "you wrote the prompts."
 
 ```bash
 brew install denn-gubsky/loomcycle/loomcycle
-loomcycle init      # writes a starter loomcycle.yaml + README in the config dir
-                    # (--with-token also mints LOOMCYCLE_AUTH_TOKEN into <configdir>/auth.env, mode 0600)
-loomcycle doctor    # verify
-loomcycle validate ~/.config/loomcycle/loomcycle.yaml   # after every edit
+loomcycle init --with-token   # ~/.config/loomcycle/loomcycle.yaml with `presets: [personal]`,
+                              # plus auth.env (mode 0600) holding a generated LOOMCYCLE_AUTH_TOKEN
+loomcycle doctor              # config, storage, port, which provider keys are set; must end `0 failures`
+loomcycle validate            # after every edit (no path = the stack a bare `loomcycle` loads)
 ```
 
-Env (secrets → `.env.local`; non-secret config → `.env.insecure`; both sourced by
-`loomcycle.sh`. Post-v0.23.0 split — see [env-vars.md](env-vars.md); a v0.23.0
-binary uses one `.env.local`):
+Secrets go in `auth.env` beside the yaml (loomcycle reads it at start, for
+variables not already set) or your own secret store; non-secret switches in
+your shell profile. Print these for the operator:
 
 ```bash
-LOOMCYCLE_LISTEN_ADDR=127.0.0.1:8787          # local only
-LOOMCYCLE_AUTH_TOKEN=<openssl rand -hex 32>   # set even locally; open mode on loopback works but warns every 10 min
-ANTHROPIC_API_KEY=<from your secret store>    # at least one provider key
-
-LOOMCYCLE_PRESETS=base                        # embedded provider/tier matrix (or write your own tiers:)
-LOOMCYCLE_BASH_ENABLED=1
-LOOMCYCLE_HTTP_HOST_ALLOWLIST=api.anthropic.com,api.github.com
+# secrets (auth.env)
+LOOMCYCLE_AUTH_TOKEN=<written by init --with-token>   # set even locally; open mode on loopback works but warns every 10 min
+ANTHROPIC_API_KEY=<from your secret store>            # or OPENAI/DEEPSEEK/GEMINI; none needed with only Ollama
 BRAVE_API_KEY=<optional, for WebSearch>
-LOOMCYCLE_MCP_ALLOW_PRIVILEGED_TOOLS=1        # only because the stdio MCP client is you
+
+# non-secret (shell profile) — each one a deliberate opt-in no preset can set
+LOOMCYCLE_DATA_DIR=$HOME/loomcycle-data               # else ./data under the start directory
+LOOMCYCLE_BASH_ENABLED=1                              # a real shell that runs as you
+LOOMCYCLE_HTTP_HOST_ALLOWLIST=api.anthropic.com,api.github.com
+LOOMCYCLE_MCP_ALLOW_PRIVILEGED_TOOLS=1                # only because the MCP client is you
 ```
 
-File access on real working dirs is declared in `loomcycle.yaml` (the paths must
-already exist):
+The listener stays on its default `127.0.0.1:8787`. Local models need only
+Ollama at `OLLAMA_BASE_URL` (default `http://localhost:11434`); with a cloud key
+too, local is tried first. File access on real working dirs is declared in
+`loomcycle.yaml` (the paths must already exist):
 
 ```yaml
+presets: [personal]
+
 volumes:
   default: { path: /Users/you/work/scratch, mode: rw, default: true }
   work:    { path: /Users/you/work,         mode: ro }
@@ -94,9 +122,14 @@ agents:
     volumes: [default, work]     # confined to exactly these
 ```
 
-Storage: SQLite (`LOOMCYCLE_DATA_DIR=./data`, the default). Agents may list
-`tools` including `Bash`/`Write`/`Edit`/`Read`/`Grep`/`Glob`. An agent that
-declares no `volumes:` is bound to the `default` volume if one exists.
+Storage: SQLite, inferred because no Postgres DSN is set; SQL Memory (and so
+Documents) is on with it. Agents may list `tools` including
+`Bash`/`Write`/`Edit`/`Read`/`Grep`/`Glob`/`Bashbox` (`Bashbox` needs no switch
+since v1.153.0). An agent that declares no `volumes:` is bound to the `default`
+volume if one exists. For a larger local context window set
+`providers.ollama-local.options.num_ctx` (or `LOOMCYCLE_OLLAMA_LOCAL_NUM_CTX`,
+which wins); for durable memory add `presets: [personal, memory]` and
+`scheduled_runs: { memory-consolidation: { enabled: true } }`.
 
 **Sharp edges:** Bash is cwd-restricted but *not isolated* — anything your user
 can do, a prompt can do. Fine here because you trust the prompts. The moment
@@ -154,12 +187,16 @@ volumes:
   files:   { path: /home/nonroot/.local/share/loomcycle/files,   mode: ro }
 ```
 
+`init` in the container writes `presets: [personal]` to the mounted config.
+The images set `LOOMCYCLE_DATA_DIR=/home/nonroot/.local/share/loomcycle`
+(v1.153.0) — the data mount above.
+
 Key differences from profile 1: `LISTEN_ADDR=0.0.0.0:8787` *inside* the
 container (port-mapped to `127.0.0.1` on the host) — which **requires**
 `LOOMCYCLE_AUTH_TOKEN` since v1.119.0 (a `0.0.0.0` bind with no credential
 refuses to boot); volumes point at
 **in-container** mounted dirs, not host paths; config mounted read-only. SQLite
-or Postgres. No host filesystem is reachable.
+or Postgres (a `LOOMCYCLE_PG_DSN` selects it). No host filesystem is reachable.
 
 **Sharp edges:** the distroless image has no shell — debug via `docker logs`,
 not `docker exec sh`, and `Bash` needs the toolbox image. Writable mount must be
@@ -195,27 +232,44 @@ LOOMCYCLE_HTTP_HOST_ALLOWLIST=api.anthropic.com
 ```
 
 For agents that genuinely need to *execute* logic, prefer **code-js** over Bash
-— it's a real sandbox (goja; `eval`/`Function` deleted; no ambient
-fetch/fs/setTimeout; path-traversal names refused; whole-run timeout):
+— a real sandbox in time (goja; `eval`/`Function` deleted; no ambient
+fetch/fs/setTimeout; path-traversal names refused), though **not bounded in
+memory**. Code agents are always available since v1.153.0 wherever the config
+declares a `code-js` provider (the default providers layer does); the root is
+an environment path, the budgets are yaml:
 
 ```bash
-LOOMCYCLE_CODE_AGENTS_ENABLED=1
 LOOMCYCLE_CODE_AGENTS_ROOT=/home/nonroot/.local/share/loomcycle/agent_code
-LOOMCYCLE_CODE_AGENTS_RUN_TIMEOUT_SECONDS=60     # ACTIVE time; waits are not counted
-LOOMCYCLE_CODE_AGENTS_MAX_WALL_SECONDS=3600      # lifetime cap, waits included (default 24h)
 ```
+
+```yaml
+providers:
+  code-js:
+    options:
+      run_timeout_seconds: 60      # ACTIVE time; waits are not counted (default 120)
+      max_wall_seconds: 3600       # lifetime cap, waits included (default 86400)
+```
+
+To make code agents unavailable instead, run with
+`LOOMCYCLE_NO_DEFAULT_PROVIDERS=1` and your own `providers:` without a
+`code-js` entry. Code hooks have no switch: control who may author hook
+definitions.
 
 Two more sandboxed execution paths, both stronger than `Bash`:
 
-- **`Bashbox`** (`LOOMCYCLE_BASHBOX_ENABLED=1`) — an in-process shell with no OS
-  process and no network that honours `ro` volumes. Leave
-  `LOOMCYCLE_BASHBOX_FALLBACK_COMMANDS` unset here. See [bashbox.md](bashbox.md).
+- **`Bashbox`** — an in-process shell with no OS process and no network that
+  honours `ro` volumes. Always registered since v1.153.0, so **any agent that
+  lists it gets it** — audit `tools:` lists (the `personal` preset's chat agents
+  list it). Leave `LOOMCYCLE_BASHBOX_FALLBACK_COMMANDS` unset here. See
+  [bashbox.md](bashbox.md).
 - **The builder sidecar** — for untrusted code that needs a real toolchain, each
   session runs in a separate ephemeral container (network off, read-only
   rootfs, `--cap-drop=ALL`); loomcycle stays distroless and drives it over
-  HTTP-MCP. Enable with `LOOMCYCLE_PRESETS=base,sandbox,dev-exec` and a shared
+  HTTP-MCP. Enable with `presets: [base, sandbox, dev-exec]` and a shared
   `SANDBOX_AUTH_TOKEN` (secret). Its shipped auth is one shared bearer, i.e.
-  single-tenant. See loomcycle `docs/SANDBOX.md`.
+  single-tenant. Its session limits are fixed since v1.153.0 (the sidecar
+  refuses to start while one of its removed `SANDBOX_*` limit variables is
+  set). See loomcycle `docs/SANDBOX.md`.
 
 Agent `tools` should be the minimal set (often just `Read` on one read-only
 volume, or specific `mcp__*` tools). Run on the distroless profile-2 image, add
@@ -262,28 +316,55 @@ customer-multi-tenant yet, but real traffic.
 **Trust:** app-scoped. Usually **no Bash**; tools limited to what the app's
 agents need (often just `Read` + specific MCP tools + HTTP to the app's own API).
 
+Environment (the `examples/profiles/server/` env files have the same split):
+
 ```bash
+# non-secret
 LOOMCYCLE_LISTEN_ADDR=0.0.0.0:8787            # behind a reverse proxy / LB
-LOOMCYCLE_AUTH_TOKEN=<required, strong>
-ANTHROPIC_API_KEY=<key>
-DEEPSEEK_API_KEY=<key>                         # if using a cost cascade (routing pattern 2)
-
-LOOMCYCLE_STORAGE_BACKEND=sqlite               # or postgres for durability/HA-readiness
-# LOOMCYCLE_PG_DSN=postgres://…?sslmode=require
-
-# App callback: let agents reach the app's own API on localhost without opening egress:
+LOOMCYCLE_PUBLIC_URL=https://agents.example.com
+LOOMCYCLE_CONFIG_DIR=/config                  # holds loomcycle.yaml
+LOOMCYCLE_DATA_DIR=/data
+LOOMCYCLE_CONFIG_STRICT=1                     # a cross-layer config clobber is fatal, not a log line
+# App callback: let agents reach the app's own API without opening egress:
 LOOMCYCLE_HTTP_HOST_ALLOWLIST=app.internal,api.anthropic.com
 LOOMCYCLE_HTTP_PRIVATE_HOST_ALLOWLIST=app.internal   # if it resolves to a private IP
 # "Private" includes CGNAT 100.64.0.0/10 — a Tailscale peer needs an entry here;
 # a CIDR entry (100.64.0.0/10) admits a whole tailnet.
+OTEL_EXPORTER_OTLP_ENDPOINT=http://otel-collector:4318   # standard OTEL_* since v1.148.0
 
-LOOMCYCLE_CONFIG_STRICT=1                      # a cross-layer config clobber is fatal, not a log line
-
-# Ops:
-LOOMCYCLE_METRICS_ENABLED=1
-LOOMCYCLE_METRICS_COLLECT_SYSTEM=1             # also sample host CPU/mem (Linux /proc) — catches co-tenant pressure (F19)
-LOOMCYCLE_OTEL_EXPORTER_OTLP_ENDPOINT=http://otel-collector:4318
+# secrets
+LOOMCYCLE_AUTH_TOKEN=<required, strong>
+ANTHROPIC_API_KEY=<key>
+DEEPSEEK_API_KEY=<key>                        # if using a cost cascade (routing pattern 2)
+# LOOMCYCLE_PG_DSN=postgres://…?sslmode=require        # its presence selects Postgres
+# LOOMCYCLE_SQLMEM_PG_DSN=postgres://…/loomcycle_sqlmem # keeps SQL Memory + Documents on with Postgres
 ```
+
+Yaml (`/config/loomcycle.yaml`):
+
+```yaml
+presets: [server]            # routing, chat/document/memory agents, metrics sampler on
+
+storage:
+  backend: sqlite            # or postgres — pin it either way
+
+concurrency:
+  max_concurrent_runs: 16
+  max_queue_depth: 64
+
+volumes:
+  dynamic: { path: /mnt/dynamic, mode: rw, dynamic_root: true }
+
+auth:
+  gates:
+    token: { kind: token, label: "Access token" }
+```
+
+The `server` preset already sets `metrics: {enabled: true, collect_system:
+true}` — host CPU/mem (Linux `/proc`) catches co-tenant pressure that the
+process's own numbers miss. On Postgres, the schema is applied by
+`loomcycle migrate up` (or `LOOMCYCLE_PG_AUTOMIGRATE=1`). See
+[observability.md](observability.md) for traces and `/metrics`.
 
 Routing: this is where `user_tiers:` earns its keep — gate plans by tier
 (routing pattern 3/4), and set `fallback_on_error: true` on each overlay that
@@ -325,7 +406,7 @@ session cookie is `Secure` behind it).
 ## 5. Multi-tenant (customers who don't trust each other)
 
 **When:** one instance fronts multiple tenants/customers. Per-principal identity
-and tenant isolation become real boundaries (RFC L).
+and tenant isolation become real boundaries.
 
 **Trust:** per-principal. The bearer token — not the request body — is the
 authority for `(tenant, subject, scopes)`.
@@ -335,32 +416,59 @@ multi-tenant service (SQLite stores tokens too, so a single-box trial works;
 Postgres is required once you add replicas):
 
 ```bash
-LOOMCYCLE_STORAGE_BACKEND=postgres
-LOOMCYCLE_PG_DSN=postgres://loomcycle:…@db:5432/loomcycle?sslmode=require
+# secrets
+LOOMCYCLE_PG_DSN=postgres://loomcycle:…@db:5432/loomcycle?sslmode=require        # selects Postgres
+LOOMCYCLE_SQLMEM_PG_DSN=postgres://loomcycle:…@db:5432/loomcycle_sqlmem?sslmode=require  # SQL Memory + Documents; role needs CREATEROLE
+LOOMCYCLE_SECRET_KEY=<openssl rand -base64 32>            # credential store, sessions, audit chain, derived token pepper; required with >1 principal
 
-LOOMCYCLE_SECRET_KEY=<openssl rand -base64 32>            # credential store KEK; also derives the token pepper (v1.119.0); secret
-# LOOMCYCLE_OPERATOR_TOKEN_PEPPER=<openssl rand -hex 32>  # optional explicit pepper; overrides the derived one
-LOOMCYCLE_AUDIT_LOG_PATH=/var/log/loomcycle/audit.jsonl   # also REQUIRED for subject erasure (disabled without it)
+# non-secret
+LOOMCYCLE_AUDIT_LOG_PATH=/var/log/loomcycle/audit.jsonl   # optional file mirror of the store-backed audit trail
 LOOMCYCLE_AUTH_CACHE_TTL_SECONDS=30                       # 0 for immediate revocation
 LOOMCYCLE_OPERATOR_TOKEN_ROTATION_GRACE_SECONDS=86400
-LOOMCYCLE_AUTH_VERBOSE=1                                  # server-side reason on 401s (wire stays opaque)
+# LOOMCYCLE_LOG_LEVEL=debug                               # while diagnosing: server-side reason on 401s (wire stays opaque)
 # LOOMCYCLE_OPERATOR_KEY_RESTRICTION=1                    # tenants without providers:operator-key must use their own key
 # LOOMCYCLE_USER_TOKEN_MAX_TTL_SECONDS=86400              # cap per-user token life (v1.112.0)
 # LOOMCYCLE_LIMITS_ENFORCE=strict                         # hard budgets also stop runs in flight (v1.112.0)
 # LOOMCYCLE_RUN_RATE_PER_MINUTE=60                        # default run-start rate for tokens with none (v1.112.0)
-# LOOMCYCLE_ACL=compat                                    # access-control rollout: compat → shadow → enforce (v1.122.0)
+# LOOMCYCLE_ACL=shadow                                    # access-control rollout: compat → shadow → enforce (v1.122.0)
 ```
 
+```yaml
+presets: [server]
+storage:
+  backend: postgres
+concurrency:
+  max_concurrent_runs: 32
+  max_queue_depth: 128
+  max_concurrent_runs_per_user: 4       # per-user fairness; cluster-wide on Postgres
+  max_queued_runs_per_user: 16
+retention:                              # nothing is deleted with age until enabled
+  enabled: true
+  interval: 24h
+  export_dir: /data/retention-exports
+  chats: { mode: export+prune, max_age: 90d }
+  defs:  { mode: prune, max_age: 30d }
+```
+
+**The audit trail is in the store.** A sign-in gate, `auth.mode: strict`, a
+`LOOMCYCLE_ACL` other than `compat`, or more than one principal turns on the
+store-backed, hash-chained audit stream, which needs `LOOMCYCLE_SECRET_KEY`
+(`LOOMCYCLE_AUDIT_RETENTION_DAYS` prunes it; default keep forever). Subject
+erasure needs a durable audit record — the store stream or the file mirror.
+
 **Token hashes are peppered by default (v1.119.0).** With
-`LOOMCYCLE_SECRET_KEY` set and no explicit `LOOMCYCLE_OPERATOR_TOKEN_PEPPER`,
-the pepper is derived from the key; with neither, hashes are unpeppered and boot
-warns. Consequences: upgrade every replica together (older releases cannot read
+`LOOMCYCLE_SECRET_KEY` set, the pepper is derived from the key; with no key,
+hashes are unpeppered and boot warns. **Since v1.156.0 an explicit
+`LOOMCYCLE_OPERATOR_TOKEN_PEPPER` beside the key is legacy**: new tokens use the
+derived pepper and old ones move as they log in; remove the variable once the
+boot line `auth: LOOMCYCLE_OPERATOR_TOKEN_PEPPER is legacy: …` counts no row
+([settings.md](settings.md#after-v11550-the-explicit-token-pepper-is-legacy)). Consequences: upgrade every replica together (older releases cannot read
 the new hash forms); rolling back means re-minting every operator token; and
 removing or changing `LOOMCYCLE_SECRET_KEY` without `LOOMCYCLE_SECRET_KEY_PREVIOUS`
 logs every operator token out. **Upgrading from a release before v1.119.0
 straight to a later one:** pre-pepper token rows are refused at login until you
-run **`loomcycle tokens rewrap`** (v1.120.0) with the server's own config and
-env — it first lists the unpeppered rows (writes nothing), then
+run **`loomcycle tokens rewrap`** (v1.120.0; refused while a legacy explicit
+pepper is set) with the server's own config and env — it first lists the unpeppered rows (writes nothing), then
 `loomcycle tokens rewrap --def-id <def_id>@<fingerprint>` (or
 `--all-listed <digest>`) moves the rows you recognise. Retire any row you did
 not mint instead. The legacy `LOOMCYCLE_AUTH_TOKEN` keeps working meanwhile.
@@ -448,10 +556,10 @@ nothing changes until you write a deny) → `shadow` (log every divergence) →
 `enforce`. See [access-control.md](access-control.md).
 
 **Runs queue instead of being refused (v1.113.0 / v1.114.0).** A run over
-`LOOMCYCLE_MAX_CONCURRENT_RUNS_PER_USER` or the global cap gets its row with
+`concurrency.max_concurrent_runs_per_user` or the global cap gets its row with
 status `queued` (cancellable, survives a restart), served round-robin across
 (tenant, user). Bounds: `concurrency.max_queue_depth` (32) and
-`LOOMCYCLE_MAX_QUEUED_RUNS_PER_USER` (16); past them `429 backpressure`.
+`concurrency.max_queued_runs_per_user` (16); past them `429 backpressure`.
 `admission: "reject"` on a request restores the old refuse-at-once answer.
 Session continuations and the LLM gateway queue too (v1.114.0). A token
 budget is checked before a run may queue and again when it starts. Details:
@@ -479,7 +587,12 @@ sessions are unchanged.
 Routing: use `user_tiers:` privacy boundaries (routing pattern 4) so a tenant's
 high tier never escapes the anthropic/openai boundary. **No anthropic-oauth-dev**
 (single-operator only). No Bash to untrusted tenants — pair with profile 3 tool
-posture.
+posture. **Always-on features reach every tenant (v1.153.0):** anyone who may
+author agent or hook definitions in a tenant can run code-js in the shared
+process (bounded in time, not in memory), schedules and webhooks fire without a
+switch, and channel `hooks:` always apply. Grant definition authoring
+deliberately ([access-control.md](access-control.md)); run tenants that need
+memory isolation in separate processes.
 
 **Postgres document plane (v1.128.0).** Each SQL Memory scope that holds
 documents gets a second schema and login role for the Document tool's tables —
@@ -519,19 +632,23 @@ also the profile to pair with the plugin's **HTTP MCP transport**
 Builds on profile 5, **requires shared Postgres**, and adds per-replica identity:
 
 ```bash
-# Every replica: SAME yaml, SAME binary version, SAME auth token.
-LOOMCYCLE_STORAGE_BACKEND=postgres
+# Every replica: SAME yaml (presets: [server], storage.backend: postgres),
+# SAME binary version, SAME secrets.
 LOOMCYCLE_PG_DSN=postgres://…@db.example.com:5432/loomcycle?sslmode=require
+LOOMCYCLE_SQLMEM_PG_DSN=postgres://…@db.example.com:5432/loomcycle_sqlmem?sslmode=require
 LOOMCYCLE_AUTH_TOKEN=<shared bearer — identical on all replicas>
-LOOMCYCLE_PG_MAX_OPEN_CONNS=<MaxConcurrentRuns × 1.5>
+LOOMCYCLE_SECRET_KEY=<identical on all replicas>
+LOOMCYCLE_PG_MAX_OPEN_CONNS=<max_concurrent_runs × 1.5>   # or storage.pg_max_open_conns; the variable wins
 
 # Per replica (UNIQUE):
 LOOMCYCLE_REPLICA_ID=replica-a    # replica-b, replica-c, …  (SQLite refuses to boot with this set)
 
-# Recommended (the stale-run sweeper LOOMCYCLE_HEARTBEAT_SWEEPER is ON by default — don't set it to 0):
-LOOMCYCLE_METRICS_ENABLED=1
-LOOMCYCLE_OTEL_EXPORTER_OTLP_ENDPOINT=<collector>
+# Recommended:
+OTEL_EXPORTER_OTLP_ENDPOINT=<collector URL with scheme>
 ```
+
+The stale-run heartbeat sweeper always runs (its switch was retired in
+v1.153.0); the `server` preset turns the metrics sampler on.
 
 Load balancer: any HTTP LB, round-robin/least-conn, **no sticky sessions**.
 Cancel, pause/resume, fairness, run status, steering/retune and session locks
@@ -539,8 +656,8 @@ all work cluster-wide via Postgres LISTEN/NOTIFY (a cancel, steer or retune is
 routed to the replica that owns the run). Verify with
 `GET /healthz` (shows the `replicas[]` membership).
 
-The scheduler may be enabled on every replica (v1.105.0): each due slot is
-fired by the one replica that claims it, and `concurrency_policy` /
+The scheduler runs on every replica (always on since v1.153.0; cluster-safe
+since v1.105.0): each due slot is fired by the one replica that claims it, and `concurrency_policy` /
 `catch_up_max` hold cluster-wide. Team webhooks are answered by any replica.
 
 Rolling upgrade: `POST /v1/_pause` → drain → snapshot → upgrade replicas one at
@@ -553,7 +670,8 @@ A **team walk does not move**: one left running by a stopped instance is ended
 **Sharp edges:**
 - Global concurrency cap (yaml `concurrency.max_concurrent_runs`) is
   **per-replica** — e.g. a cap of 10 × 2 replicas = 20 cluster-wide; per-user
-  fairness (`LOOMCYCLE_MAX_CONCURRENT_RUNS_PER_USER`) IS cluster-wide.
+  fairness (`concurrency.max_concurrent_runs_per_user`) IS cluster-wide, while
+  `max_queued_runs_per_user` counts per replica.
 - MCP stdio children are per-replica — size memory for `N replicas × M servers`.
 - Token budgets, the auth-token cache, per-provider `max_concurrent` gates,
   token run rates (`rate`, `LOOMCYCLE_RUN_RATE_PER_MINUTE`) and the
@@ -564,6 +682,10 @@ A **team walk does not move**: one left running by a stopped instance is ended
 - Upgrade every replica together when moving to v1.119.0+ with
   `LOOMCYCLE_SECRET_KEY` set — an older replica cannot read peppered token
   hashes.
+- **Upgrade every replica together when moving to v1.153.0+** and run the
+  [upgrade checklist](settings.md#upgrading-from-before-v11530--checklist) with
+  each replica's own environment; likewise v1.156.0+ with an explicit token
+  pepper (an older replica refuses tokens that moved to the derived pepper).
 - **Upgrade every replica together when moving to v1.128.0+** (snapshot
   first): an older replica knows neither the statement columns nor the Postgres
   document plane — it writes documents into the agent schema, and once a newer
@@ -585,6 +707,7 @@ A **team walk does not move**: one left running by a stopped instance is ended
 - Trust every prompt + want host tools → **1** (or **2** to contain it).
 - Need Bash but prompts aren't fully trusted → **2** (container is the boundary).
 - Prompts untrusted/model-authored → **3** (Bash off, default-deny, code-js).
-- One app, real traffic, single instance → **4**.
+- One app, real traffic, single instance → **4** (`presets: [server]`).
+- Profiles 1–3 start from `presets: [personal]`, 4–6 from `presets: [server]`.
 - Multiple customers, one instance → **5** (Postgres + per-principal tokens).
 - Need availability/scale → **6** (Postgres + replicas).

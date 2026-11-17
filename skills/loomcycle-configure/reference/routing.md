@@ -3,7 +3,9 @@
 This is the **`loomcycle.yaml` model-routing axis**. Authoritative source:
 loomcycle `docs/CONFIGURATION.md` + `docs/PROVIDERS.md` (+ `docs/DECISION-MODELS.md`
 for decision models). Field names below match loomcycle's config loader at
-**v1.135.0** — do not invent fields. Check any config you write with
+**v1.156.0** — do not invent fields. Since v1.153.0 routing **and its tuning**
+(provider options, `concurrency:`, `timeout_scaling:`) live only in the yaml;
+the environment keeps provider keys and endpoints. See [settings.md](settings.md). Check any config you write with
 `loomcycle validate <file>` (it prints agent-gate and model-kind advisories too).
 
 The agent tool-allowlist key is **`tools:`**. The old `allowed_tools:` key is
@@ -48,7 +50,32 @@ providers:
 - `vllm` and `llamacpp` are dedicated local drivers (OpenAI-compatible; default
   endpoints `http://localhost:8000/v1` and `http://localhost:8080/v1`).
 - `LOOMCYCLE_NO_DEFAULT_PROVIDERS=1` drops the built-in layer so only your
-  `providers:` entries exist.
+  `providers:` entries exist (also the way to have no `code-js` provider, now
+  that code agents have no switch).
+- **Provider options are yaml only (v1.153.0).** Each provider has its own
+  stream timeouts — there is no global timeout setting:
+
+  ```yaml
+  providers:
+    anthropic:
+      options: { header_timeout_ms: 60000, idle_timeout_ms: 90000 }   # the defaults
+    ollama:                                  # hosted Ollama
+      options: { num_ctx: 32768 }            # unset = the model's own window
+    ollama-local:
+      options:
+        num_ctx: 32768                       # LOOMCYCLE_OLLAMA_LOCAL_NUM_CTX wins when set
+        num_gpu: 99                          # layers on the GPU; unset = Ollama decides
+        header_timeout_ms: 600000            # ollama-local defaults: 600000 / 600000
+        idle_timeout_ms: 600000
+    code-js:
+      options: { deterministic: false, run_timeout_seconds: 120, max_wall_seconds: 86400 }
+  ```
+
+  Neither timeout can be disabled. `anthropic-oauth-dev` takes no options (60 s
+  to the headers, 90 s inside a stream).
+- **A provider's endpoint:** a yaml `base_url` wins over its `*_BASE_URL`
+  variable (`OLLAMA_BASE_URL`, `OLLAMA_CLOUD_BASE_URL`, `DEEPSEEK_BASE_URL`,
+  `GEMINI_BASE_URL`) — one of the two exceptions to "the environment wins".
 - **An empty key replaces.** A bare `providers:` with every entry commented out
   is a YAML null and *removes* every provider an earlier layer declared. Comment
   the key out too.
@@ -163,17 +190,28 @@ candidates; refused on an agent pinned to a provider/model.
 
 ### The run queue (v1.113.0 / v1.114.0)
 
-A run that cannot start at once — over `LOOMCYCLE_MAX_CONCURRENT_RUNS_PER_USER`
+A run that cannot start at once — over `concurrency.max_concurrent_runs_per_user`
 or the global `concurrency.max_concurrent_runs` — is **queued, not refused**:
 it gets its row (status `queued`), id and events first (`queued` with `reason`
 `user_cap` / `global_cap` and `position`, then `admitted` with `wait_ms`), is
 cancellable, and survives a restart. Waiting runs are served round-robin across
 (tenant, user). Bounds: `concurrency.max_queue_depth` (default 32) and
-`max_queued_runs_per_user` (16, `LOOMCYCLE_MAX_QUEUED_RUNS_PER_USER`); past them
-`429 backpressure`. `admission: "reject"` on a request (HTTP, gRPC, MCP
+`concurrency.max_queued_runs_per_user` (16); past them `429 backpressure`. `admission: "reject"` on a request (HTTP, gRPC, MCP
 `spawn_run` / `spawn_runs`) refuses instead of waiting. Since v1.114.0 session
 continuations and the LLM gateway queue too, and `concurrency.queue_timeout_ms`
 is no longer read. `get_run` reports `queue_position` / `queue_reason`.
+
+The whole block is yaml since v1.153.0 (the per-user and provider-queue
+variables are retired):
+
+```yaml
+concurrency:
+  max_concurrent_runs: 8              # per replica
+  max_queue_depth: 32
+  max_concurrent_runs_per_user: 0     # 0 = no per-user cap; cluster-wide on Postgres
+  max_queued_runs_per_user: 16        # 0 = refuse at once over the cap
+  provider_queue_depth: 0             # 0 = max_queue_depth; requests outside any run waiting on a capped provider
+```
 
 > **Provider keys are referenced by env-var name, never `${}`-interpolated.**
 > A provider key reaches its driver through loomcycle's `Env` struct — there is
@@ -190,8 +228,10 @@ is no longer read. `get_run` reports `queue_position` / `queue_reason`.
 > interpolated — even though the `LOOMCYCLE_` prefix would otherwise allow them:
 > `PG_DSN`, `LOOMCYCLE_PG_DSN`, `LOOMCYCLE_SQLMEM_PG_DSN`, `LOOMCYCLE_AUTH_TOKEN`,
 > `LOOMCYCLE_OPERATOR_TOKEN_PEPPER`, `LOOMCYCLE_MCP_UPSTREAM_TOKEN`,
-> `LOOMCYCLE_OTEL_EXPORTER_OTLP_HEADERS`, `LOOMCYCLE_SECRET_KEY`,
-> `LOOMCYCLE_SECRET_KEY_PREVIOUS`. Interpolating them into an outbound MCP
+> `LOOMCYCLE_OTEL_EXPORTER_OTLP_HEADERS_FILE`, `LOOMCYCLE_SECRET_KEY`,
+> `LOOMCYCLE_SECRET_KEY_PREVIOUS`, the `OTEL_EXPORTER_OTLP_*HEADERS` collector
+> variables, and the retired `LOOMCYCLE_OTEL_EXPORTER_OTLP_HEADERS` (a stale
+> value is still a live secret). Interpolating them into an outbound MCP
 > URL/header would exfiltrate loomcycle's own creds to a third party. (They reach
 > the runtime via the `Env` struct, never via yaml, so denying them breaks
 > nothing.) An expanded value containing `\r`/`\n` is also left unexpanded
@@ -574,9 +614,9 @@ compaction:
 - **Trigger manually:** the `compact_run` MCP tool compacts a *parked* run on
   demand (`/loomcycle:compact <agent_id>`); `Context op=compact` is the in-agent
   equivalent.
-- Durable park+resume of a fan-out parent blocked in `parallel_spawn` is a
-  separate, runtime-level opt-in — see `LOOMCYCLE_RESUME_FANOUT` in
-  [env-vars.md](env-vars.md).
+- Durable park+resume of a fan-out parent blocked in `parallel_spawn` is always
+  on since v1.153.0 (it used to be a runtime opt-in): a parent quiesced by
+  pause or a restart re-dispatches its in-flight children.
 - `compaction.keep_last_n` (default 4, messages) is a different key from
   `context.keep_last_n` (default 6, tool-call pairs) below.
 - Compacting a `mode: stateful` run is refused (`409 stateful_run`).
@@ -771,9 +811,12 @@ memory:
   the role that owns `memory_embeddings`. See [document.md](document.md).
 - **`memory.projection`** (v1.135.0) — places each document chunk on its scope's
   3D map by meaning (`enabled`, `interval`, `refit_after`, `refit_min_new`,
-  `sample_max`; off by default; `LOOMCYCLE_DOCUMENT_PROJECTION_INTERVAL`
-  overrides `interval` and turns it on). Needs Postgres + pgvector and
+  `sample_max`; off by default — since v1.153.0 it runs only with both
+  `enabled: true` and an `interval`). Needs Postgres + pgvector and
   `memory.embedder`; makes no model call. See [document.md](document.md).
+- **`memory.embedder.batch_size` / `timeout_ms`** (yaml since v1.153.0; defaults
+  100 texts per call and 30000 ms) sit beside the embedder's `provider` and
+  `model`.
 
 ## `timeout_scaling:` — measured model speed (v1.101.2)
 
@@ -795,18 +838,30 @@ timeout_scaling:
 - Reported on `GET /v1/_routing` (a `throughput` block per candidate), `/metrics`
   (`loomcycle_model_slowdown`, `loomcycle_model_timeout_multiplier`, …) and
   `Context op=self` (`timeouts`).
-- Env overrides win over the yaml: `LOOMCYCLE_TIMEOUT_SCALING`,
-  `LOOMCYCLE_TIMEOUT_SCALING_REFERENCE_TPS`,
-  `LOOMCYCLE_TIMEOUT_SCALING_MAX_MULTIPLIER`. A change needs a restart.
+- Yaml only since v1.153.0 (the three environment overrides are retired). A
+  change needs a restart.
 
 ## Embedded presets and config layering
 
 The binary ships provider/tier presets and agent bundles, so an install can
 resolve a sane routing base without a source checkout. Opt-in:
 
-```bash
-LOOMCYCLE_PRESETS=base,local loomcycle --config ~/.config/loomcycle/loomcycle.yaml
+```yaml
+# in the primary config file (v1.153.0); or LOOMCYCLE_PRESETS=base,local, or --preset
+presets: [base, local]
 ```
+
+- **Profiles** (v1.153.0): `personal` (= `base`, `local`, `chat`,
+  `document-agent`) and `server` (= `base`, `chat`, `document-agent`, `memory`,
+  plus the metrics sampler). One name stands for a whole installation; see
+  [settings.md](settings.md#presets-and-profiles) and [profiles.md](profiles.md).
+- **`base` routes to newer models since v1.153.0:** `haiku` / `sonnet` /
+  `opus` name `claude-haiku-5-5` / `claude-sonnet-5-5` / `claude-opus-5-5`,
+  `cloud-kimi` names `kimi-k3`, and Gemini follows DeepSeek in the provider
+  priority with `gemini-lite` / `gemini-flash` (low, middle) and `gemini-pro` /
+  `gemini-pro-preview` (high) candidates — skipped without `GEMINI_API_KEY`.
+  The `oauth` preset's aliases match since v1.154.1. Restate an alias in your
+  own `models:` to keep an older model; `GET /v1/_routing` shows the result.
 
 - **Presets** (routing only): `base` (the full provider matrix, aliases, tiers,
   user_tiers), `oauth` (puts `anthropic-oauth-dev` on top), `local` (puts
@@ -817,13 +872,18 @@ LOOMCYCLE_PRESETS=base,local loomcycle --config ~/.config/loomcycle/loomcycle.ya
 - **Bundles** (agents + inline skills): `chat`, `document-agent`, `memory`,
   `system-channels`, `sandbox`, `dev-exec`, `agent-teams`, `team-examples`,
   `doc-colorizer`, `knowledge-base` (v1.128.0 — the `kb/linker` links agent and
-  its verdict / judge models; see [knowledge-base.md](knowledge-base.md)). The
+  its verdict / judge models; see [knowledge-base.md](knowledge-base.md)),
+  `skybits-sync`. The
   `loomboard` preset (v1.127.0) declares an app sign-in client, not routing
   (see [identity.md](identity.md)). List them with `loomcycle presets`; print one with
   `loomcycle presets show <name>`.
-- **Precedence** (base → top, last wins): `LOOMCYCLE_PRESETS` (in order) →
-  `LOOMCYCLE_CONFIG_DIR/*.yaml` (lexical) → `LOOMCYCLE_CONFIG_FILES`
-  (`:`-separated) → `--config` flags (repeatable). An unknown preset name is fatal.
+- **Precedence** (base → top, last wins): the presets (`--preset`, else
+  `LOOMCYCLE_PRESETS`, else the primary file's `presets:` key; in order) →
+  `LOOMCYCLE_CONFIG_DIR/*.yaml` (lexical) → `--config` flags (repeatable). An
+  unknown preset name is fatal. (The `LOOMCYCLE_CONFIG_FILES` list was retired
+  in v1.153.0; set and non-empty it refuses the boot.) `presets:` in any file
+  other than the primary one, or a top-level `include:` in your own file, stops
+  the load.
 - **Section files:** a `loomcycle.yaml` base auto-layers every sibling
   `loomcycle.*.yaml` (lexical order; `*.example.yaml` ignored), e.g.
   `loomcycle.providers.yaml`, `loomcycle.memory.yaml`.
@@ -861,7 +921,7 @@ LOOMCYCLE_PRESETS=base,local loomcycle --config ~/.config/loomcycle/loomcycle.ya
 | a config setting `decision.max_concurrent` or `memory.reranker.max_concurrent` fails to load (v1.113.0) | Remove it; cap the provider's `lanes.decision` / `lanes.chat` instead (the error names the lane). |
 | `memory.reranker.kind: "X" is not one of listwise, decision` / `memory.reranker.sources: "X" is not one of documents, facts, notes, traces` | Fix the value. |
 | `context.mode "X" invalid (want append\|recap\|stateful\|auto)` | Fix the mode. |
-| `LOOMCYCLE_READ_ROOT, … retired in RFC AH Phase 3 — declare a volumes: block instead` | Remove the var(s) from env; use a `volumes:` block. See [volumes.md](volumes.md). |
+| `retired environment variables are set to something this version does not apply …: NAME: what to do \| …` | A variable retired in v1.153.0 (the retired jail variables `LOOMCYCLE_READ_ROOT` etc. among them). Act on each entry, then remove its line — see [settings.md](settings.md#upgrading-from-before-v11530--checklist). |
 | `agent "A": volumes[0]: unknown volume "X" (declare it in the top-level volumes: map)` | Declare `X` under `volumes:` or remove it from the agent's `volumes:` list. |
 | `no dynamic volume root configured — mark a static volume dynamic_root: true` (a `VolumeDef` tool error, not a load error) | Add `dynamic_root: true` to one `volumes:` entry. |
 | `volumes: at most one volume may be default:true` | Set `default: true` on exactly one volume. |

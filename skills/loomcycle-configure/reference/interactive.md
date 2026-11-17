@@ -1,4 +1,4 @@
-# Interactive agentic sessions (loomcycle ≥ v1.1.1; checked against v1.107.0)
+# Interactive agentic sessions (loomcycle ≥ v1.1.1; checked against v1.156.0)
 
 ## Overview
 
@@ -304,13 +304,22 @@ agent considers done, interactive waits for more work.
 
 An agent can keep its own steerable child with the `Agent` tool's `open` /
 `send` / `poll` / `cancel` / `close` ops. That is an agent driving an agent, not
-an operator session, and it is bounded by operator env:
+an operator session, and it is bounded:
 
-| Env var | Default | Bounds |
+| Bound | Value | Set by |
 |---|---|---|
-| `LOOMCYCLE_MAX_INTERACTIVE_CHILDREN` | 8 | Resident children one run holds open; `open` past it is refused |
-| `LOOMCYCLE_INTERACTIVE_CHILD_IDLE_TTL_MS` | 1800000 (30 min) | Idle time with no `send` before a resident child is reaped |
-| `LOOMCYCLE_RESIDENT_MAX_TURN_SECONDS` | 7200 (2 h) | A resident child whose current turn runs longer is reaped |
+| Resident children one run holds open (`open` past it is refused) | 8 | `LOOMCYCLE_MAX_INTERACTIVE_CHILDREN` |
+| Idle time with no `send` before a resident child is reaped | 30 min | constant since v1.153.0; `idle_ttl_seconds` on `open` overrides it per child |
+| A resident child whose current turn runs longer is reaped | 2 h | constant since v1.153.0 |
+
+Before v1.153.0 the last two were environment variables
+(`LOOMCYCLE_INTERACTIVE_CHILD_IDLE_TTL_MS`, `LOOMCYCLE_RESIDENT_MAX_TURN_SECONDS`);
+they are retired, and a value lower than the constant refuses the boot.
+
+A **top-level** interactive run parked for its operator ends after
+`LOOMCYCLE_INTERACTIVE_IDLE_TIMEOUT` (default `1h`, v1.119.0; `0` waits forever)
+with stop reason `idle_timeout`; its session is kept, so the next message
+continues it.
 
 ---
 

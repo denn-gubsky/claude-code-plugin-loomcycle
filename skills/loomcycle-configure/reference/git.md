@@ -1,4 +1,4 @@
-# Git tool reference (v1.122.0+; checked against v1.126.0)
+# Git tool reference (v1.122.0+; checked against v1.156.0)
 
 `Git` works on a git repository inside a volume an agent is bound to. It runs
 git **inside the loomcycle process** (go-git), not as a program on the host:
@@ -106,9 +106,9 @@ Off by default. Three layers must all agree:
 |---|---|---|
 | Agent | `git_remote: [fetch]` | `clone`, `fetch`, `pull`, `ls_remote`, `submodule_update` |
 | Agent | `git_remote: [fetch, push]` | also `push`. `[push]` alone is refused, as is any other value |
-| Deployment | `LOOMCYCLE_GIT_SOURCE_HOSTS` | hosts a fetch may reach (`host` or `host:port`, comma-separated). Unset = no network (`git_network_disabled`) |
+| Deployment | `LOOMCYCLE_GIT_SOURCE_HOSTS` | hosts a fetch may reach (`host` or `host:port`, comma-separated; since v1.153.0 a URL or a path stops the load). Unset = no network (`git_network_disabled`) |
 | Deployment | `LOOMCYCLE_GIT_PUSH_HOSTS` | hosts a push may reach — a **separate** list. Unset = no push (`git_push_disabled`) |
-| Deployment | `LOOMCYCLE_GIT_PUSH_MAX_BYTES` | bytes one push may send (default 100 MiB; a malformed or non-positive value refuses the boot) |
+| Deployment | (constant) | one push may send 100 MiB. A constant since v1.153.0 (`LOOMCYCLE_GIT_PUSH_MAX_BYTES` is retired; a lower value still set refuses the boot) |
 
 - `git_remote` unset or `[]` = local repositories only. It is **not
   overridable per run**, and a sub-agent may do an op only when both it and its
@@ -205,17 +205,17 @@ repository content, so it is checked like any remote: https, a host in
 
 | Bound | Value |
 |---|---|
-| Entries a checkout / merge / pull / reset / restore may write | `LOOMCYCLE_GIT_SOURCE_MAX_FILES` (default 100000) |
+| Entries a checkout / merge / pull / reset / restore may write | 100000 (fixed) |
 | Bytes such a tree may expand to | 1 GiB (fixed) |
 | `blame`, `grep`, `notes_list` | the same expansion limits plus a 2-minute deadline (`source_too_large`, `timeout`) |
 | Lists (status files, branches, tags, remotes, submodules) | cut at 1000 with `truncated: true` |
 | `show` / `diff` patch | `max_bytes`, at most 1 MiB, with `truncated` |
-| One push | `LOOMCYCLE_GIT_PUSH_MAX_BYTES` (`upload_too_large`) |
+| One push | 100 MiB, fixed (`upload_too_large`) |
 
 - The target tree is walked **before** anything moves; over a limit the op is
   refused with `source_too_large` and HEAD, the index and the files are as they
   were. A failed reset, checkout or merge restores HEAD, the branch and index.
-- `LOOMCYCLE_GIT_SOURCE_MAX_FILE_BYTES` does **not** apply to the Git tool.
+- The git-source per-file limit (5 MiB) does **not** apply to the Git tool.
 - **Path safety.** The worktree and `.git` are walked one verified directory
   handle at a time (same as `Write`), so a symlink swapped into a path cannot
   carry a write out of the volume, and no write lands inside `.git` (a tree
@@ -248,7 +248,7 @@ reaches it by name.
 | `commit` | full 40-digit sha — one commit is fetched |
 | `ref` | optional ref to look for the commit on |
 | `credential` | `$cred:` / `$ghapp:` with `allowed_urls` covering the URL (a `$ghapp:` token is narrowed to the repo, `contents: read`) |
-| `max_bytes` | may lower `LOOMCYCLE_GIT_SOURCE_MAX_BYTES` |
+| `max_bytes` | may lower the 256 MiB per-clone byte limit |
 | `diff_base` | `merge-base:default` or a sha → `_meta/diff.patch` + `_meta/numstat.json` |
 | `outputs` | `{diff, numstat}`: other names for those files under `_meta/` |
 
@@ -265,16 +265,24 @@ reaches it by name.
 - Pair with `Read` by line range (`offset`, `limit`, `line_numbers`) and
   `ephemeral_volumes: ro` on reviewer agents. See [volumes.md](volumes.md).
 
-| Setting (shared with the Git tool's fetches) | Default |
+The only setting is the host list, `LOOMCYCLE_GIT_SOURCE_HOSTS` (unset: off;
+host names, not URLs — a URL stops the load). The limits, shared with the Git
+tool's fetches, are **constants since v1.153.0**:
+
+| Limit | Value |
 |---|---|
-| `LOOMCYCLE_GIT_SOURCE_HOSTS` | unset: off |
-| `LOOMCYCLE_GIT_SOURCE_MAX_BYTES` | 256 MiB fetched, and written, per clone |
-| `LOOMCYCLE_GIT_SOURCE_MAX_OBJECT_BYTES` | 64 MiB inflated object — what bounds memory |
-| `LOOMCYCLE_GIT_SOURCE_MAX_FILE_BYTES` | 5 MiB (git sources only) |
-| `LOOMCYCLE_GIT_SOURCE_MAX_FILES` | 100000 |
-| `LOOMCYCLE_GIT_SOURCE_TIMEOUT_SECONDS` | 120, waiting for a slot included |
-| `LOOMCYCLE_GIT_SOURCE_MAX_CONCURRENT` | 1 per replica |
-| `LOOMCYCLE_GIT_SOURCE_MAX_HISTORY` | 500 commits |
+| Bytes fetched, and written, per clone | 256 MiB |
+| One inflated object — what bounds memory | 64 MiB |
+| One file written (git sources only) | 5 MiB |
+| Files, links and submodule directories per clone | 100000 |
+| Time for one clone, waiting for a slot included | 120 s |
+| Clones running at once | 1 per replica |
+| Commits searched for the commit or a merge base | 500 |
+
+Before v1.153.0 each was a `LOOMCYCLE_GIT_SOURCE_*` variable (and the push cap
+`LOOMCYCLE_GIT_PUSH_MAX_BYTES`); those are retired. A value set **lower** than
+the constant refuses the boot (enforce a tighter bound outside loomcycle, then
+remove the line); a higher one is only advised.
 
 ---
 
@@ -358,8 +366,8 @@ Every failure is `{"error": "<class>", "detail": "..."}`.
 | `non_fast_forward` | diverged history; no three-way merge — see "Not available" |
 | `worktree_dirty` | local changes would be lost — commit, `restore`, or `force` |
 | `nothing_to_commit` | nothing staged — `add`, or `all: true` |
-| `source_too_large` | a tree passed `LOOMCYCLE_GIT_SOURCE_MAX_FILES` / 1 GiB, or a fetch passed the byte limits — try `depth` / `single_branch` |
-| `upload_too_large` | push over `LOOMCYCLE_GIT_PUSH_MAX_BYTES` |
+| `source_too_large` | a tree passed 100000 entries / 1 GiB, or a fetch passed the byte limits — try `depth` / `single_branch` |
+| `upload_too_large` | push over 100 MiB |
 | `sign_key_refused` / `signing_unavailable` | key not in `crypto_scopes`, not ed25519, or Crypto budget spent / deployment cannot sign |
 | `invalid_argument` on a URL | only plain `https://` URLs (no user, password, query or fragment) — re-add the remote with an https URL |
 | Tool refuses on every op on Windows | Unix only |

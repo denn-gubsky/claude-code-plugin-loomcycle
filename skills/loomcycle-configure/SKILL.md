@@ -1,6 +1,6 @@
 ---
 name: loomcycle-configure
-description: Configure a loomcycle runtime — providers, model tiers and aliases, model kinds (chat / decision / embedder) and decision models, user tiers, fallbacks, per-agent sampling, context retention and compaction, agent hooks and hook definitions, interactive runs and review holds, environment variables, deployment profiles (brew/in-system, containerized, true sandbox, server, multi-tenant, cloud), filesystem Volumes, the Bashbox in-process sandbox, the Path VFS, chunked-graph Documents, encrypted per-tenant credentials (CredentialDef / $cred: / provider-key override), access control (rule lists, groups, bindings), users and sign-in gates, the run inbox and File tool, the Git tool, per-scope token budgets and usage/cost attribution, inbound webhooks, and third-party MCP servers. Use when the user wants to set up or tune loomcycle.yaml or its env, pick a deployment posture, wire provider routing/cost-cascades, gate plans, tune decoding (temperature/top_p), context retention or compaction, add a decision model, gate an agent's tool calls with hooks, make runs interactive or hold their answers for review, lock down tool/sandbox/auth, enable or choose between Bash and the Bashbox sandbox (incl. its host-command fallback), name resources with Path, author chunked-graph Documents (and the SQL Memory they require), copy documents between scopes, build a knowledge base (statements, the sectioned ontology, citation grammars, classify, editions, review policies, the judge, the links agent), store tenant/user API keys or bring-your-own provider keys, set token budgets, receive webhooks, connect external MCP tools, write access-control rules (ACL lists, groups, bindings), set up sign-in gates (password, OIDC, OAuth, header/SSO proxy, AWS IAM, external/bridge, device login) and users, give agents the Identity tool, handle files tools return (run inbox, File tool, extraction, OCR, transcription), or give agents the Git tool.
+description: Configure a loomcycle runtime — where each setting lives (environment vs yaml since v1.153.0, and upgrading across it), observability (OTEL, metrics, tenant telemetry), providers, model tiers and aliases, model kinds (chat / decision / embedder) and decision models, user tiers, fallbacks, per-agent sampling, context retention and compaction, agent hooks and hook definitions, interactive runs and review holds, environment variables, deployment profiles (brew/in-system, containerized, true sandbox, server, multi-tenant, cloud), filesystem Volumes, the Bashbox in-process sandbox, the Path VFS, chunked-graph Documents, encrypted per-tenant credentials (CredentialDef / $cred: / provider-key override), access control (rule lists, groups, bindings), users and sign-in gates, the run inbox and File tool, the Git tool, per-scope token budgets and usage/cost attribution, inbound webhooks, and third-party MCP servers. Use when the user wants to set up or tune loomcycle.yaml or its env, pick a deployment posture, wire provider routing/cost-cascades, gate plans, tune decoding (temperature/top_p), context retention or compaction, add a decision model, gate an agent's tool calls with hooks, make runs interactive or hold their answers for review, lock down tool/sandbox/auth, enable or choose between Bash and the Bashbox sandbox (incl. its host-command fallback), name resources with Path, author chunked-graph Documents (and the SQL Memory they require), copy documents between scopes, build a knowledge base (statements, the sectioned ontology, citation grammars, classify, editions, review policies, the judge, the links agent), store tenant/user API keys or bring-your-own provider keys, set token budgets, receive webhooks, connect external MCP tools, write access-control rules (ACL lists, groups, bindings), set up sign-in gates (password, OIDC, OAuth, header/SSO proxy, AWS IAM, external/bridge, device login) and users, give agents the Identity tool, handle files tools return (run inbox, File tool, extraction, OCR, transcription), or give agents the Git tool.
 allowed-tools: Read Write Edit Bash(loomcycle validate*) Bash(loomcycle doctor*) Bash(loomcycle init*)
 ---
 
@@ -14,12 +14,20 @@ configuration along one seam — keep it in mind throughout:
   aliases, `user_tiers:` overlays, `agents:` overrides. Declarative model policy.
   It can be split and stacked: embedded presets (`LOOMCYCLE_PRESETS`), a config
   directory, and repeatable `--config` files merge left to right, last wins.
-- **Environment owns posture** — tool sandbox roots, the auth token, storage
-  backend, multi-tenant pepper, replica id, observability. *How* and *where* it
-  runs.
+- **Environment owns secrets and the host** (v1.153.0+): API keys, the auth
+  token, connection strings, listen addresses, directories, public URLs, the
+  replica id, and the gates that open something dangerous. **Policy and tuning
+  are yaml** (`storage:`, `retention:`, `concurrency:`, `conversion:`,
+  `observability:`, …). About 150 former `LOOMCYCLE_*` variables are no longer
+  read: before printing any env line, check it in
+  [reference/env-vars.md](reference/env-vars.md). Where a setting has both
+  forms, the environment wins. Full map:
+  [reference/settings.md](reference/settings.md).
 
 The six deployment profiles the operator may ask about are points on a
-**trust × scale** grid; each is a preset of env vars over the *same* yaml.
+**trust × scale** grid. Since v1.153.0 two presets stand for whole
+installations, `personal` and `server`, and `loomcycle init --profile <name>`
+writes a profile's short config.
 
 ## Hard safety rules (non-negotiable)
 
@@ -208,8 +216,10 @@ VolumeDef op catalogue, spawn narrowing, validation errors.
 `Bashbox` is the **isolated** alternative to `Bash`: it runs commands in-process via gbash
 (pure-Go) — **no OS process, no network**, every path rooted at the bound volume. Because the
 isolation is real it **honors read-only volumes** (a `ro` binding mounts under an in-RAM overlay —
-writes succeed in-run but never touch the host; `Bash` refuses `ro`). Opt-in like Bash:
-`LOOMCYCLE_BASHBOX_ENABLED=1` + `tools:[Bashbox]`. **Prefer Bashbox over Bash for untrusted
+writes succeed in-run but never touch the host; `Bash` refuses `ro`). Always available
+since v1.153.0 (no feature switch): an agent gets it with `tools:[Bashbox]`, and
+an agent registered over MCP has it stripped unless
+`LOOMCYCLE_MCP_ALLOW_PRIVILEGED_TOOLS=1`. **Prefer Bashbox over Bash for untrusted
 prompts or read-only work;** use `Bash` only when an agent needs a real host binary (in a contained
 deployment). An operator can allowlist specific host commands gbash lacks (`git`, `gh`) to fall
 through to the host shell via `LOOMCYCLE_BASHBOX_FALLBACK_COMMANDS` (off by default; only those names
@@ -234,9 +244,11 @@ from the plugin without spawning a run (scope + tenant resolved server-side from
 and humans co-author. Bodies live in Memory; structure lives in **SQL Memory** (queryable). Its ops cover
 the document and chunk lifecycle, links and backlinks, tags, version history, type defs, image assets,
 search, Markdown and canvas round-trips, federation with a peer loomcycle, and the entity tier below;
-optimistic `revision` concurrency, atomic + orphan-free deletes. **Two
-gates: `tools:[Document]` AND `LOOMCYCLE_SQLMEM_ENABLED=1`** (the structure tables live in SQL
-Memory — the #1 "Document refused" cause). Scope `agent`/`user`/**`tenant`** (v1.41.0+ — tenant is
+optimistic `revision` concurrency, atomic + orphan-free deletes. **Needs
+`tools:[Document]` and SQL Memory** (the structure tables live there). Since v1.153.0 SQL Memory
+is **on with a SQLite store**, and on with Postgres only when `LOOMCYCLE_SQLMEM_PG_DSN` is set; a
+Postgres deployment without it logs a boot `WARN` and Documents are off, which is now the #1
+"Document refused" cause. `storage.sqlmem_enabled: false` turns it off. Scope `agent`/`user`/**`tenant`** (v1.41.0+ — tenant is
 shared across the tenant and needs `tenant` in **both** `memory_scopes` and `sql_scopes`, since a
 document spans both planes). **Also a direct MCP meta-tool** — `document`. Since v1.135.0,
 `copy_documents` copies up to 500 documents between scopes with their relations (dry run by
@@ -381,7 +393,35 @@ runtime, never shown to the model. Network ops need the agent field
 through the Crypto tool. No rebase, cherry-pick, stash or non-fast-forward merge.
 **Full reference:** [reference/git.md](reference/git.md).
 
+## Settings — where each one lives (v1.153.0+)
+
+v1.153.0 split settings into three planes: **environment** (secrets, host identity, security
+gates), **yaml** (policy and tuning), and **constants**. About 150 variables are no longer read.
+Seven features are always on: scheduler, webhooks, channel hooks, code agents, code hooks,
+Bashbox, fan-out resume. The store and SQL Memory are inferred, retention needs
+`retention.enabled: true`, and `LOOMCYCLE_CONFIG_FILES` is gone. **Before upgrading across
+v1.153.0, run the new binary's `loomcycle validate` and `loomcycle doctor` with the deployment's
+env**: they name every retired variable that is still set, and refuse where ignoring it would
+change the deployment. **Full reference:** [reference/settings.md](reference/settings.md).
+
+## Observability — metrics, traces, tenant telemetry (v1.148.0+)
+
+Standard `OTEL_*` settings with gRPC export, GenAI-named spans, in-process run/token/cost/provider
+metrics on `/metrics` scraped with a single-purpose **`metrics:read`** token (a tenant operator can
+mint one for its own series), Grafana dashboards and alert rules shipped with the binary, and
+**tenant telemetry**: a tenant exports its own traces and metrics to its own OTLP collector
+(`/loomcycle:telemetry`), where the operator allows it.
+**Full reference:** [reference/observability.md](reference/observability.md).
+
 ## Reference files (read on demand)
+
+- **[reference/settings.md](reference/settings.md)** — the environment / yaml / constant split,
+  precedence, the inferred store and SQL Memory, the `personal` / `server` presets, and the
+  upgrade checklist for crossing v1.153.0. Read this before printing any env line, and for any
+  upgrade question.
+- **[reference/observability.md](reference/observability.md)** — `OTEL_*`, metrics, the
+  `metrics:read` scrape token, dashboards, tenant telemetry and content capture. Read this for any
+  monitoring, tracing or metrics question.
 
 - **[reference/access-control.md](reference/access-control.md)** — rule lists,
   groups and bindings: the rule language and `acldef op=catalog`, yaml form,
@@ -424,7 +464,7 @@ through the Crypto tool. No rebase, cherry-pick, stash or non-fast-forward merge
   migration question.
 - **[reference/bashbox.md](reference/bashbox.md)** — Bashbox (RFC AJ, v1.3.0+):
   the true in-process gbash sandbox vs `Bash`, enablement
-  (`LOOMCYCLE_BASHBOX_ENABLED` + `tools`), how it honors `ro` volumes, the
+  (`tools:[Bashbox]`, always on since v1.153.0), how it honors `ro` volumes, the
   operator host-command fallback (`LOOMCYCLE_BASHBOX_FALLBACK_*`), and gbash
   coverage caveats. Read this for any sandboxed-shell or `Bash`-vs-`Bashbox` question.
 - **[reference/path.md](reference/path.md)** — Path primitive (RFC AL, v1.4.0+):
@@ -438,7 +478,7 @@ through the Crypto tool. No rebase, cherry-pick, stash or non-fast-forward merge
   knowledge-base, relation, ontology, citation or review question.
 - **[reference/document.md](reference/document.md)** — Document primitive (RFC AK,
   v1.4.0+): chunked-graph documents, the content/structure split, the op catalogue, the
-  **`LOOMCYCLE_SQLMEM_ENABLED` prerequisite**, optimistic concurrency, atomic
+  **SQL Memory prerequisite** (inferred from the store since v1.153.0), optimistic concurrency, atomic
   deletes, and the direct `document` MCP tool. Read this for any
   chunked-document / co-authoring question.
 - **[reference/credentials.md](reference/credentials.md)** — CredentialDef (RFC AR,

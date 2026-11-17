@@ -1,13 +1,18 @@
-# Volume primitive reference — RFC AH (v1.1.0+; checked against v1.126.0)
+# Volume primitive reference (v1.1.0+; checked against v1.156.0)
 
-Volumes replaced the legacy env-var file jail (`LOOMCYCLE_READ_ROOT` / `WRITE_ROOT` / `BASH_CWD`)
-in **v1.1.0**. A volume is the *only* way an agent gets filesystem access: an agent bound to no
+Volumes replaced the legacy env-var file jail (the retired `LOOMCYCLE_READ_ROOT` / `WRITE_ROOT` /
+`BASH_CWD`) in **v1.1.0**. A volume is the *only* way an agent gets filesystem access: an agent bound to no
 volume has every file/exec tool (Read / Write / Edit / Glob / Grep / NotebookEdit / Bash /
 Bashbox) refuse.
 
-**Retiring the jail was a BREAKING CHANGE.** Any of the three retired env vars present at startup
-causes a **fatal config-load error** — loomcycle refuses to start. Remove them from env files
-before upgrading a running instance.
+**Retiring the jail was a BREAKING CHANGE.** Any of the three retired env vars set to a non-empty
+value **refuses the boot** (since v1.153.0 it is reported with the other retired variables; an
+empty value is only advised). Remove them from env files before upgrading a running instance.
+
+Volumes are yaml, never environment: a `path:` names a directory on this host, and the file tools,
+`Bash`, `Bashbox` and `Git` all resolve against it. Files that tools return land in the run inbox
+under the `dynamic_root` volume; since v1.154.0 their conversion (extraction, OCR, media) runs in
+conversion workers by default on Linux — see [files.md](files.md).
 
 ---
 
@@ -174,8 +179,7 @@ in the system_prompt, no cleanup step.
 The path is `<dynamic_root>/_ephemeral/<root_run_id>/<name>`, so two concurrent runs never
 collide on a name. It needs an active run (refused outside one), and there is no `delete` /
 `purge` for an ephemeral volume — its lifetime is the run. A sweeper purges the volumes of
-crashed runs (`LOOMCYCLE_EPHEMERAL_VOLUME_SWEEP_MS`, default 60 s; `0` disables the sweeper, not
-the purge at run end). A paused run keeps its ephemeral volumes.
+crashed runs every 60 s (a constant since v1.153.0; it can no longer be switched off). A paused run keeps its ephemeral volumes.
 
 **Read-only scratch (v1.113.0).** `VolumeDef op=set_mode {name, mode: "ro"}` makes an ephemeral
 volume read-only for the whole run tree at once, children already running included (`rw` is
@@ -196,7 +200,8 @@ Off unless `LOOMCYCLE_GIT_SOURCE_HOSTS` lists the host; the agent needs `source:
 `volume_def_scopes` (`any` does not include it); a credential must carry `allowed_urls` covering
 the repository. Regular files only, no `.git`; `_meta/omitted.json` lists what was left out, and
 `diff_base` adds `_meta/diff.patch` + `_meta/numstat.json`. A failed clone leaves nothing. Limits
-are the `LOOMCYCLE_GIT_SOURCE_*` vars ([env-vars.md](env-vars.md)). For an agent that commits and
+are constants since v1.153.0 (256 MiB per clone, 64 MiB per object, 5 MiB per file, 100000 files,
+120 s, 1 clone at a time per replica; [git.md](git.md)). For an agent that commits and
 pushes, see the `Git` tool in [git.md](git.md).
 
 **Important:** ephemeral volumes are scoped to the creating run, not to a specific sub-agent.
@@ -243,7 +248,7 @@ ls work/dynamic/    # should exist and be writable
 
 | Error | Fix |
 |---|---|
-| `LOOMCYCLE_READ_ROOT … retired in RFC AH Phase 3 — declare a volumes: block instead …` | Remove the var from env. Use a `volumes:` block. |
+| `retired environment variables are set to … LOOMCYCLE_READ_ROOT: the filesystem jail is gone: declare a volumes: block …` (also for the retired `WRITE_ROOT` / `BASH_CWD`) | Remove the var from env. Use a `volumes:` block. |
 | `agent "X": volumes[N]: unknown volume "Y" (declare it in the top-level volumes: map)` | Declare `Y` under `volumes:` or remove it from the agent's `volumes:` list. |
 | `volumes.X: path "…" must already exist` / `… is not a directory` | Create the directory before starting. |
 | `volumes.X: invalid mode "…" (want "rw", "ro", or empty for rw)` | Fix the mode. |
