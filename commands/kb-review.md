@@ -1,6 +1,6 @@
 ---
 description: Review proposed knowledge-base relations (statements) in bulk — see what the queue holds, accept or reject whole groups with a dry run first, apply the tenant's review policy, and undo a ruling.
-argument-hint: "queue [--summary] [filters…] | accept|reject <filters…|--ids=a,b> [--reason=…] [--confirm] | policy [filters…] [--confirm] | revert <ruling_id> | rulings [--limit=N]"
+argument-hint: "queue [--summary] [filters…] | accept|reject <filters…|--ids=a,b> [--reason=…] [--confirm] | demote <filters…|--ids=a,b> --reason=… [--confirm] | policy [filters…] [--confirm] | revert <ruling_id> | rulings [--limit=N]"
 allowed-tools: mcp__loomcycle__review mcp__plugin_loomcycle_loomcycle__review
 ---
 
@@ -103,6 +103,49 @@ Then, **only if the user passed `--confirm` or now confirms**, rule:
 - A rejection is a tombstone: the same relation proposed again is refused until
   the ruling is reverted. A policy or judge rejection is only a verdict.
 
+## `demote` — take live statements back to review
+
+When a rule or a policy put a set of statements in force that should not be
+(every placement of one method under one path, say), demote them as a set:
+they go back to `proposed` and reappear in the queue. **Operators only**: an
+admin or a tenant operator. A member is refused even holding `review`.
+Needs a loomcycle release after v1.165.0; an older server refuses the action
+with `invalid_request`.
+
+**Always two calls.** First the dry run:
+
+```json
+{ "op": "rule", "action": "demote", "filter": { "method": "rule:place", … },
+  "reason": "<why>", "dry_run": true }
+```
+
+- The filter selects **live asserted** statements (`status` defaults to
+  `asserted` and may be nothing else). Every other filter works as for
+  `accept`. An empty filter is every live machine-made statement you may rule
+  on: refuse to send one unless the user explicitly said "all".
+- **`reason` is required.** Ask for it if `--reason` is missing. It is
+  recorded on each statement for the reviewer.
+- A statement a person wrote, or one an operator ruled on, is never selected
+  by a filter, so `matched` counts only what will be demoted. Synced statements
+  are not selected by a filter either. Named by `--ids`, such a statement is
+  reported in `items` (`statement_manual`, `statement_operator_ruled`,
+  `not_asserted`) and left alone.
+
+Show `matched`, the kind/method `breakdown` and a few `sample` rows. Then,
+**only if the user passed `--confirm` or now confirms**, demote:
+
+```json
+{ "op": "rule", "action": "demote", "filter": { …same… }, "reason": "<same>",
+  "dry_run": false, "expect_count": <matched> }
+```
+
+- `queue_changed`: run the dry run again and re-confirm.
+- At most 1000 per call (`max`); over that, repeat. Each call takes the next
+  ones (fresh dry run each time).
+- Render `ruled`, `failed`, `skipped` and the `ruling_id`.
+- **A demote is not undone with `revert`** (it refuses). To put statements
+  back in force, `accept` them: they are proposals now.
+
 ## `policy` — apply the tenant's review policy
 
 The tenant ontology's Review section holds ordered rules (first match wins), for
@@ -156,5 +199,5 @@ shows why), `queue_changed`, `ruling_not_found` and `unavailable`.
 page). For the review policy syntax, the judge agent and the audit sample, see
 the `loomcycle-configure` skill's `reference/knowledge-base.md`.
 
-If the sub-command is missing or unrecognised, list the five and stop rather
+If the sub-command is missing or unrecognised, list the six and stop rather
 than guessing.
