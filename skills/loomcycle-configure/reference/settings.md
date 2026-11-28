@@ -48,12 +48,11 @@ secret value in a file.
   (`LOOMCYCLE_LOG_LEVEL`, `LOOMCYCLE_LOG_FORMAT`, `LOOMCYCLE_ENVIRONMENT`, the
   standard `OTEL_*`), and sizes that follow the host
   (`LOOMCYCLE_OLLAMA_LOCAL_NUM_CTX`, `LOOMCYCLE_AUDIO_MAX_INFLIGHT`,
-  `LOOMCYCLE_EXTRACT_CONCURRENCY`, `LOOMCYCLE_BASHBOX_OVERLAY_MAX_BYTES`).
+  `LOOMCYCLE_EXTRACT_CONCURRENCY`).
 - **Security gates.** Off unless set (a few tighten instead):
   `LOOMCYCLE_ALLOW_OPEN_MODE`, `LOOMCYCLE_AUTH_MODE`, `LOOMCYCLE_ACL`,
   `LOOMCYCLE_UI_INSECURE_COOKIES`, `LOOMCYCLE_OPERATOR_KEY_RESTRICTION`,
   `LOOMCYCLE_TOKEN_AUTHORITY_INHERIT`, `LOOMCYCLE_LIMITS_ENFORCE`;
-  `LOOMCYCLE_BASH_ENABLED` and the `LOOMCYCLE_BASHBOX_FALLBACK_*` trio;
   `LOOMCYCLE_MCP_ALLOW_PRIVILEGED_TOOLS`, `LOOMCYCLE_MCP_ALLOW_DYNAMIC_STDIO`,
   `LOOMCYCLE_MCP_ALLOW_PRIVATE_IPS`; the `LOOMCYCLE_HTTP_*` host lists;
   `LOOMCYCLE_GIT_SOURCE_HOSTS`, `LOOMCYCLE_GIT_PUSH_HOSTS`;
@@ -198,16 +197,17 @@ installation:
 | `server` | `base`, `chat`, `document-agent`, `memory` | `metrics: {enabled: true, collect_system: true}` |
 
 Neither sets a volume, a sign-in gate, retention, a listen address or a
-secret, and no preset can turn on a gate: the agents they ship list `Bash`,
-`HTTP` and `WebFetch`, which stay idle until `LOOMCYCLE_BASH_ENABLED` /
-`LOOMCYCLE_HTTP_HOST_ALLOWLIST` are set in the environment. The `memory`
+secret, and no preset can turn on a gate: the agents they ship list `HTTP` and
+`WebFetch`, which stay idle until `LOOMCYCLE_HTTP_HOST_ALLOWLIST` is set in the
+environment, and the chat agents' `Workspace` does nothing until the operator
+sets `workspace.mode` ([workspaces.md](workspaces.md)). The `memory`
 bundle's consolidation schedule ships disabled
 (`scheduled_runs: { memory-consolidation: { enabled: true } }` turns it on).
 
 The other presets: `base` (provider and tier matrix), `local` (Ollama first),
 `oauth` (anthropic-oauth-dev first), `bedrock` (needs
 `LOOMCYCLE_BEDROCK_REGION`), `loomboard` (an app sign-in client); bundles
-`chat`, `document-agent`, `memory`, `system-channels`, `sandbox`, `dev-exec`,
+`chat`, `document-agent`, `memory`, `system-channels`, `dev-workspace`,
 `agent-teams`, `team-examples`, `doc-colorizer`, `knowledge-base`,
 `skybits-sync`. Details: [routing.md](routing.md#embedded-presets-and-config-layering).
 
@@ -305,7 +305,7 @@ Read loomcycle's `docs/SETTINGS_MIGRATION.md` for the full per-variable table
    name is listed at once, never with its value):
    - **Refused** when ignoring it would change the deployment: a feature switch
      set to anything but `1` (the empty value included — e.g. a compose line
-     `LOOMCYCLE_BASHBOX_ENABLED: ""`); a cap lowered below the constant that now
+     `LOOMCYCLE_SCHEDULER_ENABLED: ""`); a cap lowered below the constant that now
      applies; `LOOMCYCLE_STORAGE_BACKEND` naming another backend than the
      inferred one; `LOOMCYCLE_SQLMEM_ENABLED` asking for something the store
      inference does not give; a setting that moved to the yaml, set to a
@@ -320,7 +320,10 @@ Read loomcycle's `docs/SETTINGS_MIGRATION.md` for the full per-variable table
      / `LOOMCYCLE_TRANSCRIPTION_MAX_INFLIGHT` set lower than
      `LOOMCYCLE_AUDIO_MAX_INFLIGHT`; `LOOMCYCLE_DEADLINK_GC_MS` /
      `LOOMCYCLE_DEADLINK_GC_DRY_RUN` (now `LOOMCYCLE_DEADLINK_GC`). The full table
-     is loomcycle's `docs/SETTINGS_MIGRATION.md`.
+     is loomcycle's `docs/SETTINGS_MIGRATION.md`. On v1.172.0 or later, also
+     any `LOOMCYCLE_BASH_*` / `LOOMCYCLE_BASHBOX_*` variable set non-empty, the
+     `sandbox` / `dev-exec` presets, and a yaml agent naming `Bash`, `Bashbox`
+     or `shell_credentials` (see [workspaces.md](workspaces.md)).
    - **Advised** otherwise: a switch set to `1`, a limit raised above the
      constant (the constant applies), a moved setting at its default or whose
      yaml key is named, the debug flags.
@@ -328,8 +331,8 @@ Read loomcycle's `docs/SETTINGS_MIGRATION.md` for the full per-variable table
      simply delete is not reported, and its default applies silently.
 5. **Read the behaviour changes that have no variable to warn about:**
    - **Seven features are always on:** the scheduler, the inbound webhook
-     receiver, channel hooks, code agents (`code-js`), code hooks, Bashbox and
-     the resume of a fan-out parent. Definitions authored while a feature was
+     receiver, channel hooks, code agents (`code-js`), code hooks, Bashbox (since
+     removed, in v1.172.0) and the resume of a fan-out parent. Definitions authored while a feature was
      off start working at the first boot — **audit every tenant's schedule,
      webhook, hook and agent definitions and channel `hooks:` blocks** and
      disable or delete what you do not want.
@@ -339,8 +342,8 @@ Read loomcycle's `docs/SETTINGS_MIGRATION.md` for the full per-variable table
      `LOOMCYCLE_NO_DEFAULT_PROVIDERS=1` and your own `providers:` without a
      `code-js` entry; code hooks have no switch — control who authors hook
      definitions.
-   - **Bashbox is stripped from agents registered over MCP** (`register_agent`),
-     like `Bash`, `Write` and `Edit`, unless
+   - **Privileged tools are stripped from agents registered over MCP**
+     (`register_agent`) — today `Write`, `Edit` and `Workspace` — unless
      `LOOMCYCLE_MCP_ALLOW_PRIVILEGED_TOOLS=1`.
    - **Retention needs `retention.enabled: true`.** Removing the old retention
      variables without writing the block stops deletion silently; a family
@@ -388,8 +391,10 @@ Read loomcycle's `docs/SETTINGS_MIGRATION.md` for the full per-variable table
 6. **Start**, and read the first screen of the boot log: any remaining advisory
    is a `WARN` line `config: warning`.
 
-The sandbox builder sidecar refuses to start while any of its ten removed
-`SANDBOX_*` limit variables is set to a non-empty value; remove them.
+The sandbox builder sidecar (removed in v1.172.0, with the `sandbox` and
+`dev-exec` presets) refused to start while any of its ten removed `SANDBOX_*`
+limit variables was set; on v1.172.0 stop the sidecar and delete its secrets
+file instead ([workspaces.md](workspaces.md)).
 
 ### After v1.155.0: the explicit token pepper is legacy
 

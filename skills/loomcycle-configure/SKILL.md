@@ -1,6 +1,6 @@
 ---
 name: loomcycle-configure
-description: Configure a loomcycle runtime — where each setting lives (environment vs yaml since v1.153.0, and upgrading across it), observability (OTEL, metrics, tenant telemetry), providers, model tiers and aliases, model kinds (chat / decision / embedder) and decision models, user tiers, fallbacks, per-agent sampling, context retention and compaction, agent hooks and hook definitions, interactive runs and review holds, environment variables, deployment profiles (brew/in-system, containerized, true sandbox, server, multi-tenant, cloud), filesystem Volumes, the Bashbox in-process sandbox, the Path VFS, chunked-graph Documents, encrypted per-tenant credentials (CredentialDef / $cred: / provider-key override), access control (rule lists, groups, bindings), users and sign-in gates, the run inbox and File tool, the Git tool, per-scope token budgets and usage/cost attribution, inbound webhooks, and third-party MCP servers. Use when the user wants to set up or tune loomcycle.yaml or its env, pick a deployment posture, wire provider routing/cost-cascades, gate plans, tune decoding (temperature/top_p), context retention or compaction, add a decision model, gate an agent's tool calls with hooks, make runs interactive or hold their answers for review, lock down tool/sandbox/auth, enable or choose between Bash and the Bashbox sandbox (incl. its host-command fallback), name resources with Path, author chunked-graph Documents (and the SQL Memory they require), copy documents between scopes, build a knowledge base (statements, the sectioned ontology, citation grammars, classify, editions, review policies, the judge, the links agent), store tenant/user API keys or bring-your-own provider keys, set token budgets, receive webhooks, connect external MCP tools, write access-control rules (ACL lists, groups, bindings), set up sign-in gates (password, OIDC, OAuth, header/SSO proxy, AWS IAM, external/bridge, device login) and users, give agents the Identity tool, handle files tools return (run inbox, File tool, extraction, OCR, transcription), or give agents the Git tool.
+description: Configure a loomcycle runtime — where each setting lives (environment vs yaml since v1.153.0, and upgrading across it), observability (OTEL, metrics, tenant telemetry), providers, model tiers and aliases, model kinds (chat / decision / embedder) and decision models, user tiers, fallbacks, per-agent sampling, context retention and compaction, agent hooks and hook definitions, interactive runs and review holds, environment variables, deployment profiles (brew/in-system, containerized, true sandbox, server, multi-tenant, cloud), filesystem Volumes, Workspaces (where agents run commands since Bash and Bashbox were removed in v1.172.0), the Path VFS, chunked-graph Documents, encrypted per-tenant credentials (CredentialDef / $cred: / provider-key override), access control (rule lists, groups, bindings), users and sign-in gates, the run inbox and File tool, the Git tool, per-scope token budgets and usage/cost attribution, inbound webhooks, and third-party MCP servers. Use when the user wants to set up or tune loomcycle.yaml or its env, pick a deployment posture, wire provider routing/cost-cascades, gate plans, tune decoding (temperature/top_p), context retention or compaction, add a decision model, gate an agent's tool calls with hooks, make runs interactive or hold their answers for review, lock down tool/sandbox/auth, let agents run commands in workspaces (or migrate a config off the removed Bash / Bashbox / shell_credentials / sandbox and dev-exec presets), name resources with Path, author chunked-graph Documents (and the SQL Memory they require), copy documents between scopes, build a knowledge base (statements, the sectioned ontology, citation grammars, classify, editions, review policies, the judge, the links agent), store tenant/user API keys or bring-your-own provider keys, set token budgets, receive webhooks, connect external MCP tools, write access-control rules (ACL lists, groups, bindings), set up sign-in gates (password, OIDC, OAuth, header/SSO proxy, AWS IAM, external/bridge, device login) and users, give agents the Identity tool, handle files tools return (run inbox, File tool, extraction, OCR, transcription), or give agents the Git tool.
 allowed-tools: Read Write Edit Bash(loomcycle validate*) Bash(loomcycle doctor*) Bash(loomcycle init*)
 ---
 
@@ -43,8 +43,9 @@ writes a profile's short config.
    `LOOMCYCLE_AUTH_TOKEN` are referenced by **env-var name** only. The yaml
    never holds a key.
 3. **Tools are gated in *two* layers.** (a) The built-ins
-   `Read`/`Write`/`Edit`/`Bash`/`HTTP`/`WebFetch` refuse every call until their
-   *operator* volume/allowlist is set. (b) The capability tools additionally need
+   `Read`/`Write`/`Edit`/`HTTP`/`WebFetch` refuse every call until their
+   *operator* volume/allowlist is set, and `Workspace` until `workspace.mode`
+   is on. (b) The capability tools additionally need
    a per-agent grant, and having the tool in `tools` is necessary but **not
    sufficient**: `Channel` needs `channels:`, `Interruption` needs
    `interruption.enabled`, and the definition-authoring tools (`AgentDef`,
@@ -57,12 +58,16 @@ writes a profile's short config.
    setting that works at every layer; never widen "to make it work."
    `loomcycle validate` and `doctor` print an advisory for each gate an agent's
    tools would hit.
-4. **Bash is not a sandbox.** It is cwd-restricted + env-scrubbed only. If Bash
-   is exposed to untrusted prompts, the runtime **must** be containerized — say
-   so explicitly.
+4. **`Bash` and Bashbox are gone (v1.172.0) — never configure them.** A config
+   that sets `LOOMCYCLE_BASH_ENABLED`, `LOOMCYCLE_BASH_ALLOWED_CREDS` or any
+   `LOOMCYCLE_BASHBOX_*` variable, selects the `sandbox` or `dev-exec` preset, or
+   lists `Bash`/`Bashbox`/`shell_credentials` on an agent **refuses to start**.
+   Commands run in a workspace. A `workspace.mode: local` worker runs them as the
+   runtime's own user with no isolation; for untrusted prompts use remote workers
+   on the `container` engine — say so explicitly.
 5. **Secrets at rest in the DB are redacted (v0.23.4, F32) — but keep them
-   off the cmdline anyway.** loomcycle persists agent tool I/O (the full `Bash`
-   input + result, etc.) in its store; before v0.23.4 a token an agent inlined
+   off the cmdline anyway.** loomcycle persists agent tool I/O (a command's
+   full input + result, etc.) in its store; before v0.23.4 a token an agent inlined
    on a command line (`curl -H "Authorization: token <TOKEN>"`) was written to
    the DB in **cleartext** — and a tracked DB checkpoint could carry it into git.
    **v0.23.4 masks secret-shaped values to `[redacted:<ENV_NAME>]` before
@@ -70,8 +75,8 @@ writes a profile's short config.
    in a URL; the env-var *name* is kept for debuggability). Still advise agents to
    pass secrets **out-of-band** (env / stdin / a credential-helper script), never
    inline — so the secret never even transits a transcript. Redaction is an
-   **at-rest** guard only: a `Bash` child still inherits the live `LOOMCYCLE_*`
-   process env, so an agent *can* read a secret at runtime (ties back to rule #4).
+   **at-rest** guard only. A workspace session gets no credential at all: give a
+   script an egress route whose credential the core adds (rule #4).
 6. **Validate before declaring done.** Run `loomcycle validate <yaml>` (and
    `loomcycle doctor` if an instance is reachable). Report the real outcome.
 
@@ -96,10 +101,10 @@ writes a profile's short config.
 
 | Profile | Use when | Trust | Storage | Detail |
 |---|---|---|---|---|
-| **1. Brew + in-system agent** | Personal workstation / local automation; you trust every prompt | **Full host** — all tools incl. Bash/Write/Edit on real dirs | SQLite | [profiles.md §1](reference/profiles.md) |
-| **2. Containerized (in-container access)** | Same power, contained blast radius; the recommended default for exposing Bash | Container-bounded | SQLite or PG | [profiles.md §2](reference/profiles.md) |
-| **3. True sandbox** | Untrusted/model-authored prompts; least privilege | Minimal — Bash off, default-deny roots, tight HTTP allowlist, code-js for any exec | SQLite or PG | [profiles.md §3](reference/profiles.md) |
-| **4. Server** | A single backend serving one app's agents | App-scoped tools, no Bash, callback allowlist | SQLite or PG | [profiles.md §4](reference/profiles.md) |
+| **1. Brew + in-system agent** | Personal workstation / local automation; you trust every prompt | **Full host** — Write/Edit on real dirs, commands in a `local` workspace | SQLite | [profiles.md §1](reference/profiles.md) |
+| **2. Containerized (in-container access)** | Same power, contained blast radius; the recommended default for running commands | Container-bounded | SQLite or PG | [profiles.md §2](reference/profiles.md) |
+| **3. True sandbox** | Untrusted/model-authored prompts; least privilege | Minimal — no workspace (or `container`-engine workers only), default-deny roots, tight HTTP allowlist, code-js for any exec | SQLite or PG | [profiles.md §3](reference/profiles.md) |
+| **4. Server** | A single backend serving one app's agents | App-scoped tools, usually no workspace, callback allowlist | SQLite or PG | [profiles.md §4](reference/profiles.md) |
 | **5. Multi-tenant** | One instance fronting customers who don't trust each other | Per-principal tokens (RFC L), tenant isolation | **Postgres** | [profiles.md §5](reference/profiles.md) |
 | **6. Cloud / multi-replica** | Horizontal HA behind a load balancer | Server/multi-tenant + N replicas | **Postgres** | [profiles.md §6](reference/profiles.md) |
 
@@ -188,7 +193,7 @@ In most configs all three vars pointed at the same directory. One block replaces
 volumes:
   default:
     path: ./work    # relative to the dir run.sh cd's into
-    mode: rw        # rw = Read+Write+Edit+Bash; ro = Read/Grep/Glob only
+    mode: rw        # rw = Read+Write+Edit; ro = Read/Grep/Glob only
     default: true   # agents without an explicit `volumes:` list bind here
 
 # Required only if any agent uses VolumeDef (mkdir -p ./work/dynamic first):
@@ -211,21 +216,29 @@ A sub-agent that declares no volumes inherits its parent's; one that declares it
 **Full reference:** [reference/volumes.md](reference/volumes.md) — migration table, field reference,
 VolumeDef op catalogue, spawn narrowing, validation errors.
 
-## Bashbox — a TRUE in-process sandbox (RFC AJ) — v1.3.0+
+## Workspaces — where agents run commands — v1.172.0+
 
-`Bashbox` is the **isolated** alternative to `Bash`: it runs commands in-process via gbash
-(pure-Go) — **no OS process, no network**, every path rooted at the bound volume. Because the
-isolation is real it **honors read-only volumes** (a `ro` binding mounts under an in-RAM overlay —
-writes succeed in-run but never touch the host; `Bash` refuses `ro`). Always available
-since v1.153.0 (no feature switch): an agent gets it with `tools:[Bashbox]`, and
-an agent registered over MCP has it stripped unless
-`LOOMCYCLE_MCP_ALLOW_PRIVILEGED_TOOLS=1`. **Prefer Bashbox over Bash for untrusted
-prompts or read-only work;** use `Bash` only when an agent needs a real host binary (in a contained
-deployment). An operator can allowlist specific host commands gbash lacks (`git`, `gh`) to fall
-through to the host shell via `LOOMCYCLE_BASHBOX_FALLBACK_COMMANDS` (off by default; only those names
-escape; rw-only; creds via `LOOMCYCLE_BASHBOX_FALLBACK_ALLOWED_ENV` injected into the host child
-only). Bashbox is **in-band only** — there is no `bashbox` meta-tool.
-**Full reference:** [reference/bashbox.md](reference/bashbox.md).
+loomcycle v1.172.0 **removed** the `Bash` tool, Bashbox (and its host-command
+fallback), the `shell_credentials` field, the `sandbox` + `dev-exec` presets with
+their builder sidecar, and the toolbox image. An agent now runs commands in a
+**workspace** on a workspace worker, through the `Workspace` tool:
+
+- **Operator:** set `workspace.mode` (`local` = the runtime starts one worker
+  that runs commands as its own user, no isolation; `remote` = attach
+  `loomcycle worker --role workspace` processes, ideally with
+  `LOOMCYCLE_WORKSPACE_ENGINE=container` — images `denngubsky/loomcycle-ws-worker`
+  + session image `denngubsky/loomcycle-workspace`).
+- **Agent:** `tools: [Workspace]` plus a grant,
+  `workspace: {ops: [read, write, exec], open: true}`. Credentials reach a
+  script only through egress routes (`workspace.egress.routes`), never its
+  environment.
+- **Migrating:** remove the retired `LOOMCYCLE_BASH_*` / `LOOMCYCLE_BASHBOX_*`
+  lines (they refuse the start), replace `sandbox,dev-exec` with `dev-workspace`,
+  and replace `Bash`/`Bashbox` in yaml agents with `Workspace` + a grant. A stored
+  `AgentDef` naming them still runs without them (a `capability_inert` event,
+  gate `removed`); fork it with `Workspace`.
+
+**Full reference:** [reference/workspaces.md](reference/workspaces.md).
 
 ## Path — a Unix-like VFS (RFC AL) — v1.4.0+
 
@@ -397,8 +410,8 @@ through the Crypto tool. No rebase, cherry-pick, stash or non-fast-forward merge
 
 v1.153.0 split settings into three planes: **environment** (secrets, host identity, security
 gates), **yaml** (policy and tuning), and **constants**. About 150 variables are no longer read.
-Seven features are always on: scheduler, webhooks, channel hooks, code agents, code hooks,
-Bashbox, fan-out resume. The store and SQL Memory are inferred, retention needs
+Seven feature switches went because the features were always on: scheduler, webhooks, channel
+hooks, code agents, code hooks, Bashbox (itself removed in v1.172.0), fan-out resume. The store and SQL Memory are inferred, retention needs
 `retention.enabled: true`, and `LOOMCYCLE_CONFIG_FILES` is gone. **Before upgrading across
 v1.153.0, run the new binary's `loomcycle validate` and `loomcycle doctor` with the deployment's
 env**: they name every retired variable that is still set, and refuse where ignoring it would
@@ -440,7 +453,7 @@ mint one for its own series), Grafana dashboards and alert rules shipped with th
   any "the agent got a file / PDF / attachment" question.
 - **[reference/git.md](reference/git.md)** — the Git tool: op table, `git_remote`
   and host allowlists, credentials (`$cred:` / `$ghapp:`), signing, runtime-fetched
-  git sources, bounds, Git vs Bash with `shell_credentials`. Read this for any
+  git sources, bounds, Git vs commands in a workspace. Read this for any
   repository-work question.
 
 - **[reference/routing.md](reference/routing.md)** — providers + API-key env
@@ -462,11 +475,11 @@ mint one for its own series), Grafana dashboards and alert rules shipped with th
   ephemeral volumes, spawn narrowing, migration from legacy jail vars, validation
   errors. Read this for any file-tool sandboxing, `VolumeDef`, or Phase 3
   migration question.
-- **[reference/bashbox.md](reference/bashbox.md)** — Bashbox (RFC AJ, v1.3.0+):
-  the true in-process gbash sandbox vs `Bash`, enablement
-  (`tools:[Bashbox]`, always on since v1.153.0), how it honors `ro` volumes, the
-  operator host-command fallback (`LOOMCYCLE_BASHBOX_FALLBACK_*`), and gbash
-  coverage caveats. Read this for any sandboxed-shell or `Bash`-vs-`Bashbox` question.
+- **[reference/workspaces.md](reference/workspaces.md)** — Workspaces (v1.172.0+):
+  what refuses the start since `Bash`, Bashbox, `shell_credentials` and the
+  `sandbox`/`dev-exec` presets were removed, `workspace.mode`, workers and their
+  images, the agent `workspace` grant, egress routes for credentials. Read this
+  for any "run a command / shell / sandbox" or Bash-migration question.
 - **[reference/path.md](reference/path.md)** — Path primitive (RFC AL, v1.4.0+):
   the dirent model, the six ops, scopes + grammar, how resources opt into a name,
   the direct `path` meta-tool, and v1 caveats. Read this for any
@@ -499,8 +512,9 @@ mint one for its own series), Grafana dashboards and alert rules shipped with th
 - **[reference/env-vars.md](reference/env-vars.md)** — the grouped environment
   variable catalogue (identity/listen, storage, tool sandboxes, providers,
   memory, scheduler/webhooks/A2A, code-js, multi-tenant, observability,
-  cluster). Look up any `LOOMCYCLE_*` here before recommending it. Note: three
-  vars are **retired (v1.1.0)** — see the tool-sandboxes section.
+  cluster). Look up any `LOOMCYCLE_*` here before recommending it. Note: the
+  seven Bash / Bashbox variables **refuse the start (v1.172.0)** — see
+  "Retired in v1.172.0".
 - **[reference/webhooks.md](reference/webhooks.md)** — inbound webhooks
   (`webhooks:` block — enable, the `enabled`+`delivery` requirement + v0.23.3
   boot-validation, the webhook secret-resolution rules (`LOOMCYCLE_*` auto-allow /

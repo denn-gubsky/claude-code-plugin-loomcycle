@@ -2,15 +2,17 @@
 
 Volumes replaced the legacy env-var file jail (the retired `LOOMCYCLE_READ_ROOT` / `WRITE_ROOT` /
 `BASH_CWD`) in **v1.1.0**. A volume is the *only* way an agent gets filesystem access: an agent bound to no
-volume has every file/exec tool (Read / Write / Edit / Glob / Grep / NotebookEdit / Bash /
-Bashbox) refuse.
+volume has every file tool (Read / Write / Edit / Glob / Grep / NotebookEdit) refuse. Commands
+do not run against a volume: since v1.172.0 (`Bash` and Bashbox removed) they run in a workspace
+on a workspace worker, and the `File` tool copies files between volumes and workspaces — see
+[workspaces.md](workspaces.md).
 
 **Retiring the jail was a BREAKING CHANGE.** Any of the three retired env vars set to a non-empty
 value **refuses the boot** (since v1.153.0 it is reported with the other retired variables; an
 empty value is only advised). Remove them from env files before upgrading a running instance.
 
-Volumes are yaml, never environment: a `path:` names a directory on this host, and the file tools,
-`Bash`, `Bashbox` and `Git` all resolve against it. Files that tools return land in the run inbox
+Volumes are yaml, never environment: a `path:` names a directory on this host, and the file tools
+and `Git` resolve against it. Files that tools return land in the run inbox
 under the `dynamic_root` volume; since v1.154.0 their conversion (extraction, OCR, media) runs in
 conversion workers by default on Linux — see [files.md](files.md).
 
@@ -24,7 +26,7 @@ The three retired vars mapped to a single directory in most configs. Collapse th
 |---|---|
 | `LOOMCYCLE_READ_ROOT=/path` | `volumes: default: {path: /path, mode: ro, default: true}` |
 | `LOOMCYCLE_WRITE_ROOT=/path` | `volumes: default: {path: /path, mode: rw, default: true}` |
-| `LOOMCYCLE_BASH_CWD=/path` | Same directory as `WRITE_ROOT` — the volume root becomes the Bash cwd |
+| `LOOMCYCLE_BASH_CWD=/path` | Nothing — commands run in a workspace now ([workspaces.md](workspaces.md)) |
 
 If all three pointed at the same dir (the typical setup), one entry does it:
 
@@ -32,7 +34,7 @@ If all three pointed at the same dir (the typical setup), one entry does it:
 volumes:
   default:
     path: ./work     # relative to where `loomcycle serve` is run from (usually run.sh's cd)
-    mode: rw         # rw covers Read + Write + Edit + Bash; ro covers Read/Grep/Glob only
+    mode: rw         # rw covers Read + Write + Edit; ro covers Read/Grep/Glob only
     default: true
 ```
 
@@ -54,7 +56,7 @@ volumes:
   # Second static volume — separate read-only repo snapshot.
   readonly-src:
     path: ./loomcycle-src
-    mode: ro              # ro: Read/Grep/Glob (and Bashbox) work; Bash/Write/Edit refuse inside this volume
+    mode: ro              # ro: Read/Grep/Glob work; Write/Edit refuse inside this volume
 
   # REQUIRED when any agent uses VolumeDef (Phase 2a/2b), and for the run inbox
   # (v1.122.0: files tools return are kept there — without it they are not kept).
@@ -70,7 +72,7 @@ volumes:
 | Field | Required | Values | Meaning |
 |---|---|---|---|
 | `path` | Yes | string | Directory path. Absolute, or relative to the server launch cwd. Must already exist and be a directory at startup; the runtime never creates it. |
-| `mode` | No | `rw` \| `ro` | Omitted = `rw`. `rw` allows Read + Write + Edit + NotebookEdit + Bash. `ro` allows Read/Grep/Glob only; Write/Edit/NotebookEdit/Bash refuse. Bashbox is the exception: it accepts `ro` (writes land in an in-RAM overlay; see [bashbox.md](bashbox.md)). |
+| `mode` | No | `rw` \| `ro` | Omitted = `rw`. `rw` allows Read + Write + Edit + NotebookEdit. `ro` allows Read/Grep/Glob only; Write/Edit/NotebookEdit refuse. |
 | `default` | No | bool | If `true`, agents with no explicit `volumes:` list bind here, and a tool call that omits `volume` uses it. At most one volume may set this. |
 | `dynamic_root` | No | bool | Marks this volume as the backing store for VolumeDef-provisioned volumes **and the run inbox** (v1.122.0). Required for Phase 2a/2b and for keeping files tools return. At most one volume may set this. |
 
@@ -82,7 +84,7 @@ different set:
 ```yaml
 agents:
   dispatcher:
-    tools: [VolumeDef, Bash, Agent]
+    tools: [VolumeDef, Agent]
     volumes: [default, dynamic-root]     # explicit list
 
   reviewer:
@@ -135,7 +137,7 @@ volumes:
 
 agents:
   dispatcher:
-    tools: [Context, VolumeDef, Bash, Agent, Memory]
+    tools: [Context, VolumeDef, Agent, Memory]
     volume_def_scopes: [any]          # gate 1 (or [named:ws] for one name)
     volumes: [default, dynamic-root]  # explicit list, so `default` must be named too
 ```
@@ -161,8 +163,8 @@ different mode updates the mapping) and is refused for a name that collides with
 ephemeral volume under the `dynamic_root`, made on the first captured file and purged with the
 tree), so `create` refuses it. See [files.md](files.md).
 
-The `create` result includes a `path` field — the absolute path the agent should pass to Bash
-(`git clone <url> <path>/repo`) and to sub-agents as `ephemeral_path=<path>`.
+The `create` result includes a `path` field — the absolute path the agent passes to sub-agents
+as `ephemeral_path=<path>`.
 
 Outside a run, an operator provisions the same volumes with the `volumedef` tool
 (`create` / `get` / `list` / `delete` / `purge`) or `POST /v1/_volumedef` (`substrate:tenant`).

@@ -142,9 +142,11 @@ draft; a run that has started is stopped with `cancel_run`.
 - **A def you `create` is not live until you `promote` it.** `create` and `fork`
   mint a *version*; promote decides which version runs. This catches everyone
   once.
-- `register_agent` **strips Bash, Write and Edit** unless the operator opted in,
+- `register_agent` **strips Write, Edit and Workspace** unless the operator opted in,
   so you can ask for them and quietly get an agent without them. Check what came
-  back.
+  back. Since v1.172.0 a `register_agent`, `agentdef create` or `fork` overlay
+  naming `Bash`, `Bashbox` or `shell_credentials` is refused outright (removed;
+  use `Workspace`).
 - You cannot widen your own reach: an agent's `tools` must be a subset of what
   your token already holds. A create that tries is refused, not trimmed.
 - `scheduledef` is the exception to "not live until promoted": its forks
