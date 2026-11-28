@@ -29,8 +29,8 @@ For the rule language, rollout modes and yaml form, use the
 `loomcycle-configure` skill's `reference/access-control.md`.
 
 Parse `$ARGUMENTS`. The first token picks the part. A resource is written
-`<type>:<id>` and split at the **first** colon: `tool:Bash` →
-`{type: "tool", id: "Bash"}`, `document:tenant:/kb/**` →
+`<type>:<id>` and split at the **first** colon: `tool:Workspace` →
+`{type: "tool", id: "Workspace"}`, `document:tenant:/kb/**` →
 `{type: "document", id: "tenant:/kb/**"}`. A bare `<type>` asks about the type as
 a whole (no `id`).
 

@@ -113,8 +113,8 @@ providers:
 - A tenant's own key overrides the operator's under the name
   `AWS_BEARER_TOKEN_BEDROCK` (a CredentialDef).
 - `loomcycle doctor` checks each `auth` provider's AWS identity, and warns when
-  host `Bash` or the Bashbox host fallback is on beside one (a host command can
-  read the instance role's credentials).
+  `workspace.mode: local` runs beside one (a `host`-engine workspace command can
+  read the instance role's credentials; use `container`-engine workers there).
 
 **Cohere Embed on Bedrock (v1.121.0).** The same credentials can serve
 `memory.embedder` with `api: bedrock` (required on an `auth:` provider; no
@@ -870,7 +870,8 @@ presets: [base, local]
   keeps base's cloud providers as fallback — unset the cloud keys or set
   `LOOMCYCLE_NO_DEFAULT_PROVIDERS=1` to stay local-only.
 - **Bundles** (agents + inline skills): `chat`, `document-agent`, `memory`,
-  `system-channels`, `sandbox`, `dev-exec`, `agent-teams`, `team-examples`,
+  `system-channels`, `dev-workspace` (v1.172.0 — replaces the removed
+  `sandbox` + `dev-exec` pair, which now refuse the start), `agent-teams`, `team-examples`,
   `doc-colorizer`, `knowledge-base` (v1.128.0 — the `kb/linker` links agent and
   its verdict / judge models; see [knowledge-base.md](knowledge-base.md)),
   `skybits-sync`. The

@@ -4,6 +4,43 @@ All notable changes to this project are documented here. The format follows
 [Keep a Changelog](https://keepachangelog.com/) and the project adheres to
 [Semantic Versioning](https://semver.org/).
 
+## [Unreleased]
+
+**loomcycle v1.172.0 removed `Bash`, Bashbox and the sandbox sidecar.** The
+`loomcycle-configure` skill still taught them, and its env lines
+(`LOOMCYCLE_BASH_ENABLED`, `LOOMCYCLE_BASHBOX_FALLBACK_*`, the `sandbox` /
+`dev-exec` presets) now make loomcycle refuse to start. Commands run in
+workspaces on workspace workers instead.
+
+### Added
+
+- **`reference/workspaces.md`**: what refuses the start since v1.172.0, how a
+  stored definition that names a removed item behaves (`capability_inert`, gate
+  `removed`), `workspace.mode` (`local` / `remote`), the `loomcycle-ws-worker`
+  and `loomcycle-workspace` images, the agent `workspace` grant, and egress
+  routes for credentials. Points at loomcycle's `WORKSPACES.md`, `WORKERS.md`
+  and `MIGRATING-FROM-BASH.md`.
+
+### Changed
+
+- `loomcycle-configure` (skill, `profiles`, `env-vars`, `settings`, `volumes`,
+  `git`, `credentials`, `routing`, `access-control`, `webhooks`): Bash and
+  Bashbox guidance replaced with workspaces. Profile 1 uses
+  `workspace.mode: local`; profile 2 runs the distroless image with a
+  `container`-engine workspace worker (the toolbox image is no longer
+  published); profile 3 uses `container`-engine workers in place of Bashbox
+  and the builder sidecar. `env-vars.md` lists the seven Bash / Bashbox
+  variables under "Retired in v1.172.0 — refuse the start"; `dev-workspace`
+  replaces `sandbox` + `dev-exec` in the preset lists.
+- `reference/mcp-tools.md`: `register_agent` strips `Write`, `Edit` and
+  `Workspace`; a definition naming `Bash`, `Bashbox` or `shell_credentials` is
+  refused.
+- `/loomcycle:access` and the access-control examples use `tool:Workspace`.
+
+### Removed
+
+- `reference/bashbox.md`.
+
 ## [1.13.0] — 2026-11-17
 
 **Brought up to loomcycle v1.156.0.** The release that matters most is

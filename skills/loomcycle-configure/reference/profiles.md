@@ -17,7 +17,7 @@ Each posture below is that profile **plus** what you decide: environment
 switches (secrets, addresses, security gates) and yaml blocks (volumes, sign-in
 gates, retention, concurrency). Neither preset sets a volume, a sign-in gate,
 retention, a listen address or a secret, and **no preset can turn on a gate**
-(`LOOMCYCLE_BASH_ENABLED`, `LOOMCYCLE_HTTP_HOST_ALLOWLIST`, …) — those exist only
+(`LOOMCYCLE_HTTP_HOST_ALLOWLIST`, `LOOMCYCLE_MCP_ALLOW_PRIVILEGED_TOOLS`, …) — those exist only
 in the environment. Where each setting lives: [settings.md](settings.md);
 every variable: [env-vars.md](env-vars.md); routing yaml:
 [routing.md](routing.md). **Print env lines for the operator — never write their
@@ -29,10 +29,17 @@ Things that changed under every profile since these were first written:
   Memory, retention, concurrency, provider timeouts, timeout scaling and the
   metrics sampler are yaml or inferred; seven feature switches (scheduler,
   webhook receiver, channel hooks, code agents, code hooks, Bashbox, fan-out
-  resume) are gone because the features are always on. A deployment upgraded
+  resume) are gone because the features are always on (Bashbox itself was
+  then removed in v1.172.0). A deployment upgraded
   from before v1.153.0 must run the [upgrade checklist](settings.md#upgrading-from-before-v11530--checklist)
   first: some old lines refuse the boot, others change behaviour silently.
 
+- **`Bash`, Bashbox and the builder sidecar are removed (v1.172.0).** Agents run
+  commands in a **workspace** (`workspace.mode` + the `Workspace` tool with a
+  `workspace` grant). `LOOMCYCLE_BASH_ENABLED`, `LOOMCYCLE_BASH_ALLOWED_CREDS`,
+  any `LOOMCYCLE_BASHBOX_*` variable, the `sandbox` / `dev-exec` presets
+  (use `dev-workspace`), and a yaml agent listing `Bash`, `Bashbox` or
+  `shell_credentials` each **refuse the start**. See [workspaces.md](workspaces.md).
 - **Filesystem access is a YAML `volumes:` block, not env.** The retired
   jail variables (`LOOMCYCLE_READ_ROOT` / `LOOMCYCLE_WRITE_ROOT` /
   `LOOMCYCLE_BASH_CWD`, retired in v1.1.0) **refuse the boot** when set to a
@@ -98,12 +105,12 @@ BRAVE_API_KEY=<optional, for WebSearch>
 
 # non-secret (shell profile) — each one a deliberate opt-in no preset can set
 LOOMCYCLE_DATA_DIR=$HOME/loomcycle-data               # else ./data under the start directory
-LOOMCYCLE_BASH_ENABLED=1                              # a real shell that runs as you
 LOOMCYCLE_HTTP_HOST_ALLOWLIST=api.anthropic.com,api.github.com
 LOOMCYCLE_MCP_ALLOW_PRIVILEGED_TOOLS=1                # only because the MCP client is you
 ```
 
-The listener stays on its default `127.0.0.1:8787`. Local models need only
+Commands run in a workspace: `workspace.mode: local` (yaml below) has the
+runtime start its own worker. The listener stays on its default `127.0.0.1:8787`. Local models need only
 Ollama at `OLLAMA_BASE_URL` (default `http://localhost:11434`); with a cloud key
 too, local is tried first. File access on real working dirs is declared in
 `loomcycle.yaml` (the paths must already exist):
@@ -115,58 +122,61 @@ volumes:
   default: { path: /Users/you/work/scratch, mode: rw, default: true }
   work:    { path: /Users/you/work,         mode: ro }
 
+workspace:
+  mode: local                    # commands run as you, no isolation
+
 agents:
   dev:
     tier: middle
-    tools: [Read, Write, Edit, Grep, Glob, Bash]
+    tools: [Read, Write, Edit, Grep, Glob, Workspace, File]
     volumes: [default, work]     # confined to exactly these
+    workspace: { ops: [read, write, exec], open: true }
 ```
 
 Storage: SQLite, inferred because no Postgres DSN is set; SQL Memory (and so
-Documents) is on with it. Agents may list `tools` including
-`Bash`/`Write`/`Edit`/`Read`/`Grep`/`Glob`/`Bashbox` (`Bashbox` needs no switch
-since v1.153.0). An agent that declares no `volumes:` is bound to the `default`
+Documents) is on with it. An agent that declares no `volumes:` is bound to the `default`
 volume if one exists. For a larger local context window set
 `providers.ollama-local.options.num_ctx` (or `LOOMCYCLE_OLLAMA_LOCAL_NUM_CTX`,
 which wins); for durable memory add `presets: [personal, memory]` and
 `scheduled_runs: { memory-consolidation: { enabled: true } }`.
 
-**Sharp edges:** Bash is cwd-restricted but *not isolated* — anything your user
-can do, a prompt can do. Fine here because you trust the prompts. The moment
+**Sharp edges:** the `local` workspace worker is *not isolated* — a command runs
+as the runtime's user and can read its data directory, config and secrets;
+anything your user can do, a prompt can do. Fine here because you trust the prompts. The moment
 prompts come from elsewhere, move to profile 2 or 3.
 
 **Relative paths resolve under the volume, not the process CWD.** A relative
 `Read`/`Write`/`Edit`/`Grep`/`Glob` path is joined to the root of the volume the
-call targets, and `Bash` runs in the root of its bound `rw` volume — so where
-you launch loomcycle from no longer matters. (The old advice to launch from the
-jail root applied to the retired `READ_ROOT`/`WRITE_ROOT`/`BASH_CWD` jail.)
-`Bash` is refused on a `ro` volume; `Bashbox` honours `ro` (see
-[bashbox.md](bashbox.md)).
+call targets — so where you launch loomcycle from no longer matters. (The old
+advice to launch from the jail root applied to the retired
+`READ_ROOT`/`WRITE_ROOT`/`BASH_CWD` jail.) A workspace is a separate directory
+on the worker; the `File` tool copies files between volumes and workspaces (see
+[workspaces.md](workspaces.md)).
 
 ---
 
 ## 2. Containerized with in-container resource access (safer default)
 
-**When:** you want the same capabilities (incl. Bash) but a real blast-radius
-boundary. **This is the recommended way to expose Bash.** The container *is* the
-sandbox.
+**When:** you want the same capabilities (incl. running commands) but a real
+blast-radius boundary. The container *is* the sandbox.
 
 **Trust:** container-bounded. A prompt can act inside the container only;
 nonroot (uid 65532), no host shell.
 
-**Pick the image by whether you need `Bash`.** The default
-`denngubsky/loomcycle` image is distroless — it has no `/bin/sh`, so the `Bash`
-tool cannot run there (file tools, `Bashbox`, HTTP and MCP all work).
-`denngubsky/loomcycle-toolbox` is the same binary on a Debian base with a dev
-toolchain (Python / Go / Rust / C++ / Node, `git`, `gh`, `curl`) — a drop-in
-swap with the same uid and mount paths. Use it for `Bash`, single-tenant /
-trusted prompts only: commands run inside loomcycle's own container.
+**Run the distroless `denngubsky/loomcycle` image; run commands on a workspace
+worker.** The runtime image has no `/bin/sh` (the `loomcycle-toolbox` image is no
+longer published since v1.172.0). For commands, add a
+`denngubsky/loomcycle-ws-worker` container beside it on the `container` engine,
+starting each workspace in `denngubsky/loomcycle-workspace` (Python, Node, git),
+with `workspace.mode: remote` and a `workers:attach` token — see
+[workspaces.md](workspaces.md) and loomcycle `docs/WORKERS.md` for the compose
+service.
 
 ```bash
-docker pull denngubsky/loomcycle-toolbox:latest   # or denngubsky/loomcycle:latest (no Bash)
+docker pull denngubsky/loomcycle:latest
 mkdir -p ./config ./data/files ./data/scratch && sudo chown -R 65532:65532 ./data
 docker run --rm -v $(pwd)/config:/home/nonroot/.config/loomcycle \
-  denngubsky/loomcycle-toolbox:latest init --no-interactive
+  denngubsky/loomcycle:latest init --no-interactive
 # add the volumes: block below to ./config/loomcycle.yaml, then:
 docker run -d --name loomcycle \
   -p 127.0.0.1:8787:8787 \
@@ -175,9 +185,8 @@ docker run -d --name loomcycle \
   -e LOOMCYCLE_AUTH_TOKEN=$(openssl rand -hex 32) \
   -e ANTHROPIC_API_KEY=your-key \
   -e LOOMCYCLE_LISTEN_ADDR=0.0.0.0:8787 \
-  -e LOOMCYCLE_BASH_ENABLED=1 \
   -e LOOMCYCLE_HTTP_HOST_ALLOWLIST=api.anthropic.com \
-  denngubsky/loomcycle-toolbox:latest
+  denngubsky/loomcycle:latest
 ```
 
 ```yaml
@@ -199,7 +208,7 @@ refuses to boot); volumes point at
 or Postgres (a `LOOMCYCLE_PG_DSN` selects it). No host filesystem is reachable.
 
 **Sharp edges:** the distroless image has no shell — debug via `docker logs`,
-not `docker exec sh`, and `Bash` needs the toolbox image. Writable mount must be
+not `docker exec sh`; commands belong on a workspace worker. Writable mount must be
 owned by uid 65532 on Linux.
 
 ---
@@ -220,7 +229,8 @@ LOOMCYCLE_LISTEN_ADDR=0.0.0.0:8787            # inside container, port-mapped to
 LOOMCYCLE_AUTH_TOKEN=<required>
 ANTHROPIC_API_KEY=<key>
 
-# Bash OFF (unset LOOMCYCLE_BASH_ENABLED). No privileged tools for dynamic agents
+# No workspace (leave workspace.mode off), or only container-engine workers.
+# No privileged tools for dynamic agents
 # (do NOT set LOOMCYCLE_MCP_ALLOW_PRIVILEGED_TOOLS; do NOT set LOOMCYCLE_MCP_ALLOW_DYNAMIC_STDIO).
 # No `volumes:` block in the yaml → every file/exec tool refuses (no disk access).
 # If an agent must read files, bind ONE read-only volume and nothing else:
@@ -231,8 +241,8 @@ LOOMCYCLE_HTTP_HOST_ALLOWLIST=api.anthropic.com
 # Private IPs are hard-blocked at connect regardless — leave it that way.
 ```
 
-For agents that genuinely need to *execute* logic, prefer **code-js** over Bash
-— a real sandbox in time (goja; `eval`/`Function` deleted; no ambient
+For agents that genuinely need to *execute* logic without a toolchain, prefer
+**code-js** — a real sandbox in time (goja; `eval`/`Function` deleted; no ambient
 fetch/fs/setTimeout; path-traversal names refused), though **not bounded in
 memory**. Code agents are always available since v1.153.0 wherever the config
 declares a `code-js` provider (the default providers layer does); the root is
@@ -255,21 +265,16 @@ To make code agents unavailable instead, run with
 `code-js` entry. Code hooks have no switch: control who may author hook
 definitions.
 
-Two more sandboxed execution paths, both stronger than `Bash`:
-
-- **`Bashbox`** — an in-process shell with no OS process and no network that
-  honours `ro` volumes. Always registered since v1.153.0, so **any agent that
-  lists it gets it** — audit `tools:` lists (the `personal` preset's chat agents
-  list it). Leave `LOOMCYCLE_BASHBOX_FALLBACK_COMMANDS` unset here. See
-  [bashbox.md](bashbox.md).
-- **The builder sidecar** — for untrusted code that needs a real toolchain, each
-  session runs in a separate ephemeral container (network off, read-only
-  rootfs, `--cap-drop=ALL`); loomcycle stays distroless and drives it over
-  HTTP-MCP. Enable with `presets: [base, sandbox, dev-exec]` and a shared
-  `SANDBOX_AUTH_TOKEN` (secret). Its shipped auth is one shared bearer, i.e.
-  single-tenant. Its session limits are fixed since v1.153.0 (the sidecar
-  refuses to start while one of its removed `SANDBOX_*` limit variables is
-  set). See loomcycle `docs/SANDBOX.md`.
+For untrusted code that needs a real toolchain, use **workspaces on remote
+workers with the `container` engine** (`LOOMCYCLE_WORKSPACE_ENGINE=container`):
+each workspace runs in its own container with no network but the egress routes
+it holds, a read-only root, every capability dropped and a non-root uid;
+`LOOMCYCLE_WORKSPACE_CONTAINER_RUNTIME=runsc` (gVisor) or a Kata runtime adds a
+kernel boundary. Set `engine: container` in each agent's `workspace` grant so it
+never lands on a `host`-engine worker, and do **not** use `workspace.mode: local`
+here. (This replaces Bashbox and the builder sidecar — the `sandbox` and
+`dev-exec` presets are removed since v1.172.0; `dev-workspace` replaces them.)
+See [workspaces.md](workspaces.md).
 
 Agent `tools` should be the minimal set (often just `Read` on one read-only
 volume, or specific `mcp__*` tools). Run on the distroless profile-2 image, add
@@ -277,7 +282,7 @@ seccomp/read-only-rootfs/`--cap-drop=ALL` at the container layer, and keep the
 listener bound to loopback behind your app.
 
 **Some capability tools have a *second* default-deny gate — and some no longer
-do.** Beyond the operator tool-enable (the Bash/HTTP env vars, `volumes:`) and the
+do.** Beyond the operator tool-enable (the HTTP env vars, `volumes:`, `workspace.mode`) and the
 agent `tools`:
 
 - **Still default-deny when the gate is unset:** `Channel` (`channels:` —
@@ -302,9 +307,9 @@ looking like the agent "chose" not to use the tool. An agent authored *inside a
 run* (`AgentDef` create/fork) is additionally held to its author's own
 capability fields (v1.104.0).
 
-**Sharp edges:** loomcycle's docs are explicit — Bash is *not* a sandbox; if you
-need shell-like behavior for untrusted prompts, you want code-js or a separate
-hardened container, not `LOOMCYCLE_BASH_ENABLED=1`.
+**Sharp edges:** a `local` (host-engine) workspace worker is *not* a sandbox; if
+you need shell-like behavior for untrusted prompts, you want code-js or
+container-engine workers.
 
 ---
 
@@ -313,7 +318,7 @@ hardened container, not `LOOMCYCLE_BASH_ENABLED=1`.
 **When:** loomcycle is the sidecar/back-end for a single application. Not
 customer-multi-tenant yet, but real traffic.
 
-**Trust:** app-scoped. Usually **no Bash**; tools limited to what the app's
+**Trust:** app-scoped. Usually **no workspace**; tools limited to what the app's
 agents need (often just `Read` + specific MCP tools + HTTP to the app's own API).
 
 Environment (the `examples/profiles/server/` env files have the same split):
@@ -370,8 +375,8 @@ Routing: this is where `user_tiers:` earns its keep — gate plans by tier
 (routing pattern 3/4), and set `fallback_on_error: true` on each overlay that
 should cascade (the key has no default). Use `loomcycle pause`/`resume`/`snapshot` for safe
 deploys, and `POST /v1/_config/reload` (`?dry_run=1` to preview) to apply a
-routing/agent edit without a restart. Bash stays off unless the box is dedicated
-and the prompts are trusted (then it's really profile 2).
+routing/agent edit without a restart. Workspaces stay off unless the app's
+agents must run code; then use remote `container`-engine workers, not `local`.
 
 A single app can also skip minted tokens and **declare** its service identities
 in yaml — the yaml carries only the env-var *name* of each bearer:
@@ -586,7 +591,8 @@ sessions are unchanged.
 
 Routing: use `user_tiers:` privacy boundaries (routing pattern 4) so a tenant's
 high tier never escapes the anthropic/openai boundary. **No anthropic-oauth-dev**
-(single-operator only). No Bash to untrusted tenants — pair with profile 3 tool
+(single-operator only). No `local` workspace worker for untrusted tenants — use
+per-tenant or shared `container`-engine workers and pair with profile 3 tool
 posture. **Always-on features reach every tenant (v1.153.0):** anyone who may
 author agent or hook definitions in a tenant can run code-js in the shared
 process (bounded in time, not in memory), schedules and webhooks fire without a
@@ -705,8 +711,8 @@ A **team walk does not move**: one left running by a stopped instance is ended
 ## Quick decision aid
 
 - Trust every prompt + want host tools → **1** (or **2** to contain it).
-- Need Bash but prompts aren't fully trusted → **2** (container is the boundary).
-- Prompts untrusted/model-authored → **3** (Bash off, default-deny, code-js).
+- Need to run commands but prompts aren't fully trusted → **2** (container-engine workspace workers).
+- Prompts untrusted/model-authored → **3** (no `local` workspace, default-deny, code-js).
 - One app, real traffic, single instance → **4** (`presets: [server]`).
 - Profiles 1–3 start from `presets: [personal]`, 4–6 from `presets: [server]`.
 - Multiple customers, one instance → **5** (Postgres + per-principal tokens).

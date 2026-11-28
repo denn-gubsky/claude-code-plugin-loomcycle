@@ -12,8 +12,9 @@ git **inside the loomcycle process** (go-git), not as a program on the host:
 - **No server text.** A network failure reaches the model as a class
   (`auth_failed`, `not_found`, …); the remote's own words go to the operator log.
 
-It is the safe alternative to allowlisting `git` as a Bashbox host command or
-giving `Bash` a `GITHUB_TOKEN`, where the model can print the credential.
+It is the safe way to push: the credential never reaches a shell the model
+drives. (The `Bash` tool and Bashbox's host `git` fallback, where the model
+could print a `GITHUB_TOKEN`, were removed in v1.172.0.)
 
 Enable it per agent with `tools: [Git]` — it is always registered, with no
 deployment flag. Local work needs only a bound volume; the network has its own
@@ -286,22 +287,18 @@ remove the line); a higher one is only advised.
 
 ---
 
-## Git vs git source vs Bash with `shell_credentials`
+## Git vs git source vs a git workspace
 
 | Need | Use |
 |---|---|
 | Read one commit under review, no write-back | **git source** volume (`mode: ro`) |
 | Branch, commit, push a change | **`Git`** with a rw volume and `git_remote: [fetch, push]` |
-| Rebase, cherry-pick, stash, a three-way merge, SSH remotes, running build/test tools | **`Bash`** (real `git`) |
+| Rebase, cherry-pick, stash, a three-way merge, running build/test tools | A **workspace** (real `git` in a session): `Workspace op=open {repo, credential}` opens a git workspace whose network work goes through typed git ops, with the credential held by the core |
 
-`Bash` / Bashbox host commands receive credentials by name from
-`LOOMCYCLE_BASH_ALLOWED_CREDS` / `LOOMCYCLE_BASHBOX_FALLBACK_ALLOWED_CREDS`,
-and **the model can read them** (`env`, or `git -c alias.x='!env' x` through
-an allowlisted host `git`). Since v1.122.0 the per-agent **`shell_credentials`**
-field narrows that set: unset = every listed credential, `[]` = none, a list =
-only those names. It only narrows, a sub-agent gets the intersection with its
-parent, and it is not overridable per run. Give a shell only credentials you
-would hand the model; prefer `Git` for anything that pushes.
+A workspace session never receives a credential in its environment; see
+[workspaces.md](workspaces.md). The per-agent `shell_credentials` field was
+removed in v1.172.0 with `Bash` — a yaml agent that still sets it (even `[]`)
+refuses the start.
 
 ---
 
@@ -321,7 +318,6 @@ agents:
     volumes: [work]
     git_remote: [fetch, push]        # needs LOOMCYCLE_GIT_PUSH_HOSTS too
     crypto_scopes: [tenant]          # only to sign with sign_key
-    shell_credentials: []            # no shell secrets, belt and braces
 
   reviewer:
     tools: [Read, Grep, Git]

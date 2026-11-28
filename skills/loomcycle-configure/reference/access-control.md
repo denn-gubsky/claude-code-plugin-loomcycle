@@ -5,7 +5,7 @@ instances, and never deny. Access control adds authority **per user and per grou
 named **rule lists** (ACLs) of allow and deny rules, **groups** that nest, and
 **bindings** that attach a list to a user, a group, a token or a whole tenant. That
 is how an operator says "the support group may run `chat/*` but not `admin/*`, may
-read the `shared-ro` volume but not write it, and never gets `Bash`".
+read the `shared-ro` volume but not write it, and never gets `Workspace`".
 
 The rules are asked at every HTTP, gRPC and MCP gate, and **intersected with an
 agent's own grants inside a run**. Nothing changes until an operator writes or
@@ -51,8 +51,8 @@ scope:
 decide (tools, volumes — asked as `mount volume:<name>` — memory, SQL and history
 scopes, user and agent crypto, decision models) up to what those rules allow;
 **operator-grade fields** (`statement_methods`, `git_remote`, every
-`*_def_scopes`, tenant and run crypto) must be unset; an agent with a shell tool
-must set `shell_credentials: []`. A member also may not activate, retire or
+`*_def_scopes`, tenant and run crypto) must be unset, and so must the
+`workspace` grant. A member also may not activate, retire or
 delete a version of an agent or team an operator holds, nor `register_agent`
 under such a name. MCP `erasure` needs `substrate:tenant`.
 
@@ -77,7 +77,7 @@ A selector is `<type>:<name>`, and the name takes one of three shapes:
 
 | Shape | Examples | Notes |
 |---|---|---|
-| `/`-glob | `agent:chat/*`, `agent:chat/**`, `tool:Bash`, `mcp:jobs/patch*` | `*` is one segment, `**` any depth |
+| `/`-glob | `agent:chat/*`, `agent:chat/**`, `tool:Workspace`, `mcp:jobs/patch*` | `*` is one segment, `**` any depth |
 | scoped name | `memory:tenant`, `document:tenant:/kb/**`, `def:agent/chat/*`, `principal:user:support-*`, `credential:user:*` | `<scope><sep><glob>`; scope may be `*`; omitting the glob means every instance of the scope |
 | enum | `gateway:chat`, `history:self`, `runtime:metrics` | exactly one of the type's values, or `*` |
 
@@ -92,7 +92,7 @@ At v1.156.0 the verbs that may be written are:
 |---|---|---|
 | `agent` | run, spawn; **read** (type-level only) | glob |
 | `volume` | read, write, mount | glob |
-| `tool` | invoke | glob (built-in tools: `tool:Bash`, `tool:Git`) |
+| `tool` | invoke | glob (built-in tools: `tool:Workspace`, `tool:Git`) |
 | `skill` | invoke; **read** (type-level only) | glob |
 | `mcp` / `mcp-tool` | invoke / invoke | glob (`mcp:<server>/<tool>`; `mcp-tool:<name>` = a loomcycle MCP meta-tool) |
 | `a2a` | invoke | glob |
@@ -240,7 +240,7 @@ acls:
       - { effect: allow, actions: [run],       resources: ["agent:chat/*", "agent:support/**"] }
       - { effect: allow, actions: [read],      resources: ["agent:*"] }   # type-level only: must be agent:*
       - { effect: allow, actions: [read],      resources: ["volume:shared-ro"] }
-      - { effect: deny,  actions: [invoke],    resources: ["tool:Bash", "tool:Bashbox"] }
+      - { effect: deny,  actions: [invoke],    resources: ["tool:Workspace"] }
       - { effect: deny,  actions: [run],       resources: ["agent:admin/**"] }
       - effect: deny                   # no support agents at weekends
         actions: [run]
@@ -510,12 +510,12 @@ One implementation behind four transports, so every gate holds on each.
 ```
 acldef      { "op": "catalog" }
 acldef      { "op": "create", "name": "no-shell", "rules": [
-              { "effect": "deny", "actions": ["invoke"], "resources": ["tool:Bash", "tool:Bashbox"] } ] }
+              { "effect": "deny", "actions": ["invoke"], "resources": ["tool:Workspace"] } ] }
 groupdef    { "op": "create", "name": "support" }
 groupdef    { "op": "add_member", "name": "support", "kind": "user", "id": "alice" }
 aclbinding  { "op": "create", "acl": "no-shell", "subject_kind": "group", "subject_id": "support" }
 authz       { "op": "explain", "subject": { "id": "alice" },
-              "action": { "name": "invoke" }, "resource": { "type": "tool", "id": "Bash" } }
+              "action": { "name": "invoke" }, "resource": { "type": "tool", "id": "Workspace" } }
 ```
 
 **Agent-side self-checks:** inside a run an agent asks its own rules with

@@ -161,11 +161,14 @@ same rule.
   private key never leaves loomcycle.
 - **Hook headers** — a webhook hook on an agent may carry `$cred:<name>` in its
   `headers`, resolved for the run each time the hook is called.
-- **Bash / Bashbox host commands** — names listed in
-  `LOOMCYCLE_BASH_ALLOWED_CREDS` / `LOOMCYCLE_BASHBOX_FALLBACK_ALLOWED_CREDS`
-  are resolved for the run's own identity and injected into the shell's
-  environment, where **the model can read them**; an agent narrows them with
-  `shell_credentials` (see [bashbox.md](bashbox.md)).
+- **Workspace egress routes** — a route's `credential: "$cred:<name>"`
+  (`workspace.egress.routes`, or a tenant's `EgressRouteDef`) is added by the
+  core to a script's request on the way out; the session never sees it. A git
+  workspace (`Workspace op=open {repo, credential}`) holds its credential the
+  same way (see [workspaces.md](workspaces.md)). (The shell-injection path —
+  `LOOMCYCLE_BASH_ALLOWED_CREDS`, `LOOMCYCLE_BASHBOX_FALLBACK_ALLOWED_CREDS`,
+  `shell_credentials` — was removed in v1.172.0; those settings refuse the
+  start.)
 - **The Git tool** — `"credential": "$cred:<name>"` or `"$ghapp:<name>"`, which
   must be restricted with `allowed_urls` to the repository (see [git.md](git.md)).
 - **A tenant's telemetry collector headers** — `headers_credential` on the

@@ -51,7 +51,7 @@ secret lines for the operator.** Secrets (`*_API_KEY`, `LOOMCYCLE_AUTH_TOKEN`,
 
 | Var | Default | Purpose |
 |---|---|---|
-| `LOOMCYCLE_PRESETS` | (unset) | Comma-separated embedded presets layered as the base of the config stack. The profiles `personal` and `server` (v1.153.0) each stand for a whole stack; the units are `base`, `oauth`, `local`, `bedrock`, `loomboard` and the bundles `chat`, `document-agent`, `memory`, `system-channels`, `sandbox`, `dev-exec`, `agent-teams`, `team-examples`, `doc-colorizer`, `knowledge-base`, `skybits-sync`. `--preset` wins over it, and it wins over the primary file's `presets:` key (an advisory names both when they differ). An unknown name is fatal. See [settings.md](settings.md#presets-and-profiles). |
+| `LOOMCYCLE_PRESETS` | (unset) | Comma-separated embedded presets layered as the base of the config stack. The profiles `personal` and `server` (v1.153.0) each stand for a whole stack; the units are `base`, `oauth`, `local`, `bedrock`, `loomboard` and the bundles `chat`, `document-agent`, `memory`, `system-channels`, `dev-workspace`, `agent-teams`, `team-examples`, `doc-colorizer`, `knowledge-base`, `skybits-sync`. `--preset` wins over it, and it wins over the primary file's `presets:` key (an advisory names both when they differ). An unknown name is fatal. See [settings.md](settings.md#presets-and-profiles). |
 | `LOOMCYCLE_CONFIG_DIR` | (unset) | A directory whose `*.yaml`/`*.yml` layer in lexical order, above the presets and below `--config`. **Since v1.153.0** its `agents/`, `skills/` and `help/` subdirectories are also loaded when the matching `*_ROOT` variable is unset. Set-but-missing is fatal. |
 | `LOOMCYCLE_CONFIG_STRICT` | off | `1` makes any cross-layer conflict a **fatal** load error (otherwise each override is logged at startup). Recommended in production. |
 | `LOOMCYCLE_NO_DEFAULT_PROVIDERS` | off | `1` drops the built-in provider layer so only your own `providers:` exist — e.g. local-only, or no `code-js` provider (the only way to keep code agents unavailable since v1.153.0). |
@@ -77,18 +77,14 @@ The store is **inferred** (v1.153.0): Postgres when `LOOMCYCLE_PG_DSN` (or yaml
 
 ## Built-in tool sandboxes and egress
 
-`Bashbox` is **always registered** since v1.153.0 (an agent gets it through
-`tools:`); it needs no switch. `Bash` still does. File tools need a `volumes:`
-block. See [bashbox.md](bashbox.md) and [volumes.md](volumes.md).
+File tools need a `volumes:` block ([volumes.md](volumes.md)). Commands run
+in a workspace, turned on in yaml with `workspace.mode`, not by an env switch
+([workspaces.md](workspaces.md)). `Bash` and Bashbox were **removed in
+v1.172.0**: their variables now refuse the start (see
+[Retired in v1.172.0](#retired-in-v11720--refuse-the-start)).
 
 | Var | Default | Purpose |
 |---|---|---|
-| `LOOMCYCLE_BASH_ENABLED` | off | `1` enables `Bash`. **Not a sandbox** — cwd-restricted, env-scrubbed, output-bounded (1 MiB), time-capped (30 s default, 5 min max); runs in the root of the bound `rw` volume. Leave off on a server with more than one tenant. |
-| `LOOMCYCLE_BASH_ALLOWED_CREDS` | (empty) | Comma-separated CredentialDef names injected into the `Bash` child env, resolved per run for its own (tenant, user, agent). Needs `LOOMCYCLE_SECRET_KEY`. |
-| `LOOMCYCLE_BASHBOX_FALLBACK_COMMANDS` | off | Comma-separated host commands gbash lacks (`git,gh`) that may fall through to the **real host shell**; requires a `rw` volume; loud boot warning. |
-| `LOOMCYCLE_BASHBOX_FALLBACK_ALLOWED_ENV` | (empty) | Env-var **names** the fallback host commands may see (`GH_TOKEN,HOME,SSH_AUTH_SOCK`), host child only. |
-| `LOOMCYCLE_BASHBOX_FALLBACK_ALLOWED_CREDS` | (empty) | CredentialDef names injected into fallback commands for the run's own identity (`git:GITHUB_TOKEN,gh:GH_TOKEN`). Needs `LOOMCYCLE_SECRET_KEY`. |
-| `LOOMCYCLE_BASHBOX_OVERLAY_MAX_BYTES` | 64 MiB | **(v1.119.0)** Bytes one `Bashbox` call may write into memory (overlay writes + the shadowed `dynamic_root`); under 1 MiB is raised to 1 MiB. |
 | `LOOMCYCLE_HTTP_HOST_ALLOWLIST` | (unset = refuse all) | `HTTP`+`WebFetch`: comma-separated **suffix-match** host allowlist; `*` allows any public host. Private and CGNAT addresses are hard-blocked at connect regardless. Env-only: a reload cannot change it. |
 | `LOOMCYCLE_HTTP_PRIVATE_HOST_ALLOWLIST` | (unset) | Hosts that may resolve to private IPs at dial (a localhost callback). An entry may be a **CIDR range** (`100.64.0.0/10` for a tailnet). Also the only way a runtime-authored remote memory backend, document source or tenant MCP server reaches a private host. |
 | `LOOMCYCLE_HTTP_PRIVATE_HOST_ALLOWLIST_MODE` | (unset) | **(v1.142.0)** `cidr_only` refuses host names in the private-host lists (this one and the yaml `hooks.private_host_allowlist`), puts the operator's MCP servers behind the guard (list their addresses as CIDRs), and makes `LOOMCYCLE_MCP_ALLOW_PRIVATE_IPS=1` fail startup. |
@@ -96,7 +92,7 @@ block. See [bashbox.md](bashbox.md) and [volumes.md](volumes.md).
 | `BRAVE_API_KEY` / `SERPER_API_KEY` / `EXA_API_KEY` / `TAVILY_API_KEY` | (unset) | **Secrets** — `WebSearch` provider keys (SearXNG is keyless, configured in yaml `search_providers:`). |
 | `LOOMCYCLE_WEBSEARCH_PROVENANCE` | off | `1` appends a `(via <provider>)` footer to each search result. |
 | `LOOMCYCLE_REDACT_SECRETS` | on | Tool inputs/outputs are scanned for secret-shaped substrings and masked before they are persisted. `0` disables. The live SSE stream is not redacted. |
-| `LOOMCYCLE_MCP_ALLOW_PRIVILEGED_TOOLS` | off | `1` lets agents registered through MCP `register_agent` keep `Bash`, **`Bashbox`** (since v1.153.0), `Write` and `Edit`; otherwise they are stripped silently. Only for a trusted MCP client. |
+| `LOOMCYCLE_MCP_ALLOW_PRIVILEGED_TOOLS` | off | `1` lets agents registered through MCP `register_agent` keep `Write`, `Edit` and `Workspace`; otherwise they are stripped. Only for a trusted MCP client. |
 | `LOOMCYCLE_MCP_ALLOW_DYNAMIC_STDIO` | off | `1` lets a runtime-authored MCP server (`mcpserverdef`) use `transport: stdio` — it **runs a local command**. Static yaml `mcp_servers:` are unaffected. |
 | `LOOMCYCLE_MCP_ALLOW_PRIVATE_IPS` | on | `0` enables a dial-time DNS-rebinding block for the MCP-HTTP client (operator yaml and admin-saved servers; a **tenant's** runtime MCP server always dials through the egress guard). |
 | `LOOMCYCLE_MCP_REFUSE_UNATTRIBUTED_ENV` | refuse | A stored runtime MCP server def holding a `${NAME}` env reference without an admin-save record is refused (v1.113.0). `0` keeps the old warn-and-dial while re-saves are pending. |
@@ -393,6 +389,26 @@ the variable sees no change). From CONFIGURATION.md "Fixed limits".
 | Sweeps: run heartbeat, ephemeral volumes / expired Memory, channel messages, dynamic agents, metrics samples, provider re-probe, session locks / usage rollup / team subscriptions / SSE keepalive | 60 s / 15 min / 5 min (idle 10 min) / 1 h / 15 s / 20 s |
 | Chats of internal agents (when chat retention is on) | deleted after 3 days |
 
+## Retired in v1.172.0 — refuse the start
+
+Removed with the `Bash` tool, Bashbox and its host-command fallback. **Each one
+set to a non-empty value stops the server at start**, with a line naming it
+(set but empty, it is reported as a dead line; `loomcycle doctor` lists them
+under "Removed"). Never print one as a live setting. Replacements are in
+[workspaces.md](workspaces.md) and loomcycle `docs/MIGRATING-FROM-BASH.md`.
+
+| Retired variable | Now |
+|---|---|
+| `LOOMCYCLE_BASH_ENABLED` | `workspace.mode` (yaml) + the `Workspace` tool with a `workspace` grant |
+| `LOOMCYCLE_BASH_ALLOWED_CREDS` | An egress route with a credential (`workspace.egress.routes`, or an `EgressRouteDef`) |
+| `LOOMCYCLE_BASHBOX_ENABLED` | Nothing — Bashbox is gone; use a workspace |
+| `LOOMCYCLE_BASHBOX_FALLBACK_COMMANDS`, `LOOMCYCLE_BASHBOX_FALLBACK_ALLOWED_ENV` | Run the commands in a workspace whose worker image carries them; a session gets no host variable |
+| `LOOMCYCLE_BASHBOX_FALLBACK_ALLOWED_CREDS` | An egress route with a credential, or for git a git workspace opened with a credential (or the `Git` tool) |
+| `LOOMCYCLE_BASHBOX_OVERLAY_MAX_BYTES` | Nothing — a workspace has a disk quota (`workspace.disk_quota_mb`) |
+
+The `sandbox` and `dev-exec` values of `LOOMCYCLE_PRESETS` refuse the start the
+same way: select `dev-workspace`.
+
 ## Retired in v1.153.0
 
 Variables this page listed before v1.153.0 that are **no longer read**. Do not
@@ -406,7 +422,7 @@ Per-variable rules: loomcycle `docs/SETTINGS_MIGRATION.md` §7, tables A–E.
 | `LOOMCYCLE_SQLMEM_ENABLED` | Inferred (on with SQLite; on with Postgres when `LOOMCYCLE_SQLMEM_PG_DSN` is set); off with `storage.sqlmem_enabled: false` |
 | `LOOMCYCLE_SQLMEM_MAX_ROWS`, `_STATEMENT_TIMEOUT_MS`, `_TXN_TIMEOUT_MS`, `_MAX_OPEN_TXNS`, `_MAX_TXN_DEPTH`, `_GC_INTERVAL_MS` (all `LOOMCYCLE_SQLMEM_*`) | yaml `storage.sqlmem_max_rows`, `…_statement_timeout_ms`, `…_txn_timeout_ms`, `…_max_open_txns`, `…_max_txn_depth`, `…_gc_interval_ms` |
 | `LOOMCYCLE_CONFIG_FILES` | Gone; pass each file as `--config`, or place it in `LOOMCYCLE_CONFIG_DIR` (set and non-empty, it refuses the boot) |
-| `LOOMCYCLE_SCHEDULER_ENABLED`, `LOOMCYCLE_WEBHOOKS_ENABLED`, `LOOMCYCLE_CHANNEL_HOOKS`, `LOOMCYCLE_CODE_AGENTS_ENABLED`, `LOOMCYCLE_CODE_HOOKS_ENABLED`, `LOOMCYCLE_BASHBOX_ENABLED`, `LOOMCYCLE_RESUME_FANOUT` | Always on (any value but `1` refuses the boot) |
+| `LOOMCYCLE_SCHEDULER_ENABLED`, `LOOMCYCLE_WEBHOOKS_ENABLED`, `LOOMCYCLE_CHANNEL_HOOKS`, `LOOMCYCLE_CODE_AGENTS_ENABLED`, `LOOMCYCLE_CODE_HOOKS_ENABLED`, `LOOMCYCLE_RESUME_FANOUT` | Always on (any value but `1` refuses the boot) |
 | `LOOMCYCLE_A2A_ENABLED` | Inferred: A2A is on when `LOOMCYCLE_A2A_SERVER_CARD` is set |
 | `LOOMCYCLE_HEARTBEAT_SWEEPER`, `LOOMCYCLE_USAGE_SWEEPER`, `LOOMCYCLE_MEMORY_PROVISION_IDENTITY_DOCS` | Always on (`0` / off refuses the boot) |
 | `LOOMCYCLE_RETENTION_ENABLED` and the `LOOMCYCLE_RETENTION_*` interval, export dir, family modes, ages and keep-last-N | yaml `retention:` (`enabled`, `interval`, `export_dir`, `<family>.mode` / `max_age`, `defs.keep_last_n`) |

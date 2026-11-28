@@ -355,8 +355,8 @@ mcp_servers:
   (`POST /v1/_mcpserverdef` / the `mcpserverdef` tool, no restart). See
   "Registering a server at runtime" below. **stdio** servers are spawned at
   startup; in yaml they're operator-trusted and need no flag.
-- The **server process holds the token** (in its own env); the agent's Bash
-  never sees it.
+- The **server process holds the token** (in its own env); the agent never
+  sees it.
 
 > **A dynamic-MCP-only agent now actually calls its tools (v0.23.5, F33/#409).**
 > An agent whose `tools` is **only** a runtime-MCP wildcard (e.g.
